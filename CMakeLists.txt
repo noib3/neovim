@@ -391,7 +391,7 @@ ExternalProject_Add(download_luals
   CMAKE_CACHE_ARGS ${DEPS_CMAKE_CACHE_ARGS})
 
 file(GLOB_RECURSE LUAFILES runtime/*.lua)
-add_target(luals
+add_target(luals-runtime
   COMMAND ${DEPS_BIN_DIR}/luals/bin/lua-language-server
     --configpath=${PROJECT_SOURCE_DIR}/.luarc.json
     --check=${PROJECT_SOURCE_DIR}/runtime
@@ -399,4 +399,18 @@ add_target(luals
   DEPENDS ${LUAFILES}
   CUSTOM_COMMAND_ARGS USES_TERMINAL)
 
-add_dependencies(luals download_luals)
+add_dependencies(luals-runtime download_luals)
+
+file(GLOB_RECURSE SRC_LUAFILES src/*.lua)
+add_target(luals-src
+  COMMAND ${DEPS_BIN_DIR}/luals/bin/lua-language-server
+    --configpath=${PROJECT_SOURCE_DIR}/src/.luarc.json
+    --check=${PROJECT_SOURCE_DIR}/src
+    --checklevel=Hint
+  DEPENDS ${SRC_LUAFILES}
+  CUSTOM_COMMAND_ARGS USES_TERMINAL)
+
+add_dependencies(luals-src download_luals)
+
+add_custom_target(luals)
+add_dependencies(luals luals-runtime luals-src)
