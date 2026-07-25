@@ -132,8 +132,6 @@ describe('TUI', function()
       '--cmd',
       nvim_set .. ' laststatus=2 background=dark',
     }, { env = env_notermguicolors })
-    tt.override_screen_expect_for_conpty(screen)
-
     feed_data('iZZZSENTINEL')
 
     -- Leave insert mode and run a job that writes directly to CON, blocking
@@ -172,7 +170,6 @@ describe('TUI :detach', function()
       '--cmd',
       nvim_set .. ' laststatus=2 background=dark',
     }, { env = env_notermguicolors })
-    tt.override_screen_expect_for_conpty(screen)
   end
 
   it('does not stop server', function()
@@ -1098,7 +1095,6 @@ describe('TUI', function()
   end)
 
   it('accepts resize while pager is active', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_exec2',
       [[
@@ -2387,7 +2383,6 @@ describe('TUI', function()
   end)
 
   it("paste: 'nomodifiable' buffer", function()
-    tt.override_screen_expect_for_conpty(screen)
     child_exec_lua([[
       vim.bo.modifiable = false
       -- Truncate the error message to hide the line number
@@ -2598,7 +2593,6 @@ describe('TUI', function()
   end)
 
   it('allows termguicolors to be set at runtime', function()
-    tt.override_screen_expect_for_conpty(screen)
     screen:set_option('rgb', true)
     feed_data(':hi SpecialKey ctermfg=3 guifg=SeaGreen\n')
     feed_data('i')
@@ -2793,7 +2787,6 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider ambiwidth chars than host terminal', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_buf_set_lines',
       0,
@@ -2838,7 +2831,6 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider non-ambiwidth chars than host terminal', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_buf_set_lines',
       0,
@@ -3546,14 +3538,17 @@ describe('TUI', function()
       '--cmd',
       'set foldcolumn=6 | call setline(1, ["", repeat("aabb", 1000)]) | echo 42',
     }, { extra_rows = 10, cols = 66 })
-    screen:expect([[
+    screen:expect(
+      [[
             ^                                                            |
             aabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabb|*12
             aabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabba@@@|
-      {2:[No Name] [+]                                   1,0-1          Top}|
+      [No Name] [+]                                   1,0-1          Top|
       42                                                                |
-      {5:-- TERMINAL --}                                                    |
-    ]])
+      -- TERMINAL --                                                    |
+    ]],
+      {}
+    )
     feed_data('\12') -- Ctrl-L
     -- The first line counts as 3 cells.
     -- For the second line, 6 repeated spaces at the start counts as 2 cells,
@@ -3562,14 +3557,17 @@ describe('TUI', function()
     -- 3 + 8 * 62 = 499 cells have been counted.
     -- The 6 repeated spaces at the start of the next screen line exceeds the
     -- 500-cell limit, so the buffer is flushed after these spaces.
-    screen:expect([[
+    screen:expect(
+      [[
             ^                                                            |
             aabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabb|*12
             aabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabba@@@|
-      {2:[No Name] [+]                                   1,0-1          Top}|
+      [No Name] [+]                                   1,0-1          Top|
                                                                         |
-      {5:-- TERMINAL --}                                                    |
-    ]])
+      -- TERMINAL --                                                    |
+    ]],
+      {}
+    )
   end)
 
   it('no heap-buffer-overflow when changing &columns', function()
@@ -3856,7 +3854,6 @@ describe('TUI FocusGained/FocusLost', function()
   end)
 
   it('in hit-enter prompt', function()
-    tt.override_screen_expect_for_conpty(screen)
     feed_data(":echom 'msg1'|echom 'msg2'|echom 'msg3'|echom 'msg4'|echom 'msg5'\n")
     screen:expect([[
       msg1                                              |
