@@ -1861,6 +1861,7 @@ describe('inccommand on ex mode', function()
     clear()
     local screen
     screen = Screen.new(60, 10)
+    screen._default_attr_ids = nil
     local id = fn.jobstart({
       nvim_prog,
       '-u',
@@ -1876,28 +1877,11 @@ describe('inccommand on ex mode', function()
       env = { VIMRUNTIME = os.getenv('VIMRUNTIME') },
     })
     fn.chansend(id, '%s/N')
-    screen:add_extra_attr_ids({
-      [103] = {
-        background = Screen.colors.NvimDarkGray2,
-      },
-      [104] = {
-        background = Screen.colors.NvimDarkGray4,
-      },
-      [101] = {
-        background = Screen.colors.NvimDarkGrey4,
-        foreground = Screen.colors.NvimLightGray2,
-      },
-      [102] = {
-        background = Screen.colors.NvimDarkGray2,
-        foreground = Screen.colors.NvimLightGray2,
-      },
-    })
     screen:expect([[
-      {103:^                                                            }|
-      {103:                                                            }|*5
-      {104:                                                            }|
-      {102:Entering Ex mode.  Type "visual" to go to Normal mode.}{103:      }|
-      {102::%s/N}{103:                                                       }|
+      ^                                                            |
+                                                                  |*6
+      Entering Ex mode.  Type "visual" to go to Normal mode.      |
+      :%s/N                                                       |
                                                                   |
     ]])
   end)
