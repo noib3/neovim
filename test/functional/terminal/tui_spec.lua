@@ -132,6 +132,7 @@ describe('TUI', function()
       '--cmd',
       nvim_set .. ' laststatus=2 background=dark',
     }, { env = env_notermguicolors })
+    tt.override_screen_expect_for_conpty(screen)
     feed_data('iZZZSENTINEL')
 
     -- Leave insert mode and run a job that writes directly to CON, blocking
@@ -170,6 +171,7 @@ describe('TUI :detach', function()
       '--cmd',
       nvim_set .. ' laststatus=2 background=dark',
     }, { env = env_notermguicolors })
+    tt.override_screen_expect_for_conpty(screen)
   end
 
   it('does not stop server', function()
@@ -1095,6 +1097,7 @@ describe('TUI', function()
   end)
 
   it('accepts resize while pager is active', function()
+    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_exec2',
       [[
@@ -2383,6 +2386,7 @@ describe('TUI', function()
   end)
 
   it("paste: 'nomodifiable' buffer", function()
+    tt.override_screen_expect_for_conpty(screen)
     child_exec_lua([[
       vim.bo.modifiable = false
       -- Truncate the error message to hide the line number
@@ -2593,6 +2597,7 @@ describe('TUI', function()
   end)
 
   it('allows termguicolors to be set at runtime', function()
+    tt.override_screen_expect_for_conpty(screen)
     screen:set_option('rgb', true)
     feed_data(':hi SpecialKey ctermfg=3 guifg=SeaGreen\n')
     feed_data('i')
@@ -2703,7 +2708,7 @@ describe('TUI', function()
     child_session:request('nvim_set_hl', 0, 'Visual', { undercurl = true })
     feed_data('ifoobar\027V')
     screen:expect([[
-      {107:fooba}^r                                            |
+      {114:fooba}^r                                            |
       {100:~}                                                 |*3
       {3:[No Name] [+]                                     }|
       {5:-- VISUAL LINE --}                                 |
@@ -2711,7 +2716,7 @@ describe('TUI', function()
     ]])
     child_session:request('nvim_set_hl', 0, 'Visual', { underdouble = true })
     screen:expect([[
-      {107:fooba}^r                                            |
+      {115:fooba}^r                                            |
       {100:~}                                                 |*3
       {3:[No Name] [+]                                     }|
       {5:-- VISUAL LINE --}                                 |
@@ -2787,6 +2792,7 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider ambiwidth chars than host terminal', function()
+    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_buf_set_lines',
       0,
@@ -2831,6 +2837,7 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider non-ambiwidth chars than host terminal', function()
+    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_buf_set_lines',
       0,
@@ -3410,7 +3417,7 @@ describe('TUI', function()
     screen:expect([[
       ^                                                  |
       ~                                                 |*3
-      {2:[No Name]                       0,0-1          All}|
+      [No Name]                       0,0-1          All|
                                                         |
       {5:-- TERMINAL --}                                    |
     ]])
@@ -3420,7 +3427,7 @@ describe('TUI', function()
       --embed                                           |
       --clean                                           |
       ^Xargv0nvim                                        |
-      {2:[No Name] [+]                   5,1            Bot}|
+      [No Name] [+]                   5,1            Bot|
       4 more lines                                      |
       {5:-- TERMINAL --}                                    |
     ]])
@@ -3443,7 +3450,7 @@ describe('TUI', function()
     screen:expect([[
       {5:^foo}                                               |
       ~                                                 |*3
-      {2:[No Name] [+]                   1,1            All}|
+      [No Name] [+]                   1,1            All|
       {5:foo}                                               |
       {5:-- TERMINAL --}                                    |
     ]])
@@ -3538,17 +3545,14 @@ describe('TUI', function()
       '--cmd',
       'set foldcolumn=6 | call setline(1, ["", repeat("aabb", 1000)]) | echo 42',
     }, { extra_rows = 10, cols = 66 })
-    screen:expect(
-      [[
+    screen:expect([[
             ^                                                            |
             aabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabb|*12
             aabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabba@@@|
       [No Name] [+]                                   1,0-1          Top|
       42                                                                |
-      -- TERMINAL --                                                    |
-    ]],
-      {}
-    )
+      {5:-- TERMINAL --}                                                    |
+    ]])
     feed_data('\12') -- Ctrl-L
     -- The first line counts as 3 cells.
     -- For the second line, 6 repeated spaces at the start counts as 2 cells,
@@ -3557,17 +3561,14 @@ describe('TUI', function()
     -- 3 + 8 * 62 = 499 cells have been counted.
     -- The 6 repeated spaces at the start of the next screen line exceeds the
     -- 500-cell limit, so the buffer is flushed after these spaces.
-    screen:expect(
-      [[
+    screen:expect([[
             ^                                                            |
             aabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabb|*12
             aabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabba@@@|
       [No Name] [+]                                   1,0-1          Top|
                                                                         |
-      -- TERMINAL --                                                    |
-    ]],
-      {}
-    )
+      {5:-- TERMINAL --}                                                    |
+    ]])
   end)
 
   it('no heap-buffer-overflow when changing &columns', function()
@@ -3854,6 +3855,7 @@ describe('TUI FocusGained/FocusLost', function()
   end)
 
   it('in hit-enter prompt', function()
+    tt.override_screen_expect_for_conpty(screen)
     feed_data(":echom 'msg1'|echom 'msg2'|echom 'msg3'|echom 'msg4'|echom 'msg5'\n")
     screen:expect([[
       msg1                                              |
