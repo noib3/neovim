@@ -223,6 +223,10 @@ function M.override_screen_expect_for_conpty(screen)
   local orig_screen_expect = screen.expect
   function screen.expect(self, expected, attr_ids, ...)
     if type(expected) == 'string' then
+      -- Ignore attribute groups that contain only blank cells. ConPTY may
+      -- merge them into either adjacent group, so retaining the group itself
+      -- makes the patterns below require a boundary that may not exist.
+      expected = expected:gsub('{[^{}\n]-: +}', ' ')
       expected = expected:gsub('%}%^ +', '{MATCH:[^|]*%%^[^|]*}')
       expected = expected:gsub(' +%} *', '{MATCH: *}}{MATCH:[^|]*}')
       expected = expected:gsub('%} +', '{MATCH: *}}{MATCH:[^|]*}')

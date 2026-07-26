@@ -1771,16 +1771,13 @@ describe('TUI', function()
     else
       api.nvim_input_mouse('left', 'press', '', 0, 2, 6)
     end
-    local cleared_popup_row = is_os('win')
-        and '{100:~                                                 }'
-      or '{100:~}  {100:     }                                          '
-    screen:expect(([[
+    screen:expect([[
       ^popup menu test                                   |
-      %s|*3
+      {100:~}  {100:     }                                          |*3
       {3:[No Name] [+]                                     }|
       :let g:menustr = 'bar'                            |
       {5:-- TERMINAL --}                                    |
-    ]]):format(cleared_popup_row))
+    ]])
     if esc then
       feed_data('\027[<0;7;3m')
     else
@@ -1818,17 +1815,14 @@ describe('TUI', function()
     else
       api.nvim_input_mouse('right', 'release', '', 0, 5, 47)
     end
-    local cleared_popup_overlap_row = is_os('win')
-        and '{100:~                                                 }'
-      or '{100:~}  {100:     }                                   {100:     }  '
-    screen:expect(([[
+    screen:expect([[
       ^popup menu test                                   |
-      %s|*2
-      %s|
+      {100:~}  {100:     }                                          |*2
+      {100:~}  {100:     }                                   {100:     }  |
       {3:[No Name] [+]                                     }|
       :let g:menustr = 'baz'                            |
       {5:-- TERMINAL --}                                    |
-    ]]):format(cleared_popup_row, cleared_popup_overlap_row))
+    ]])
   end
 
   describe('mouse events work with right-click menu', function()
@@ -3364,7 +3358,7 @@ describe('TUI', function()
       -- so bg is dark.
       local fg = is_os('win') and Screen.colors.NvimLightGrey2 or Screen.colors.NvimDarkGrey2
       local bg = is_os('win') and Screen.colors.NvimDarkGrey2 or Screen.colors.NvimLightGrey2
-      screen:add_extra_attr_ids({
+      local extra_attr_ids = {
         BgOnly = {
           background = bg,
         },
@@ -3372,19 +3366,18 @@ describe('TUI', function()
           foreground = fg,
           background = bg,
         },
-      })
+      }
       if is_os('win') then
-        screen:add_extra_attr_ids({
-          WinTilde = {
-            foreground = Screen.colors.NvimDarkGrey4,
-            background = bg,
-          },
-          WinStatus = {
-            foreground = fg,
-            background = Screen.colors.NvimDarkGrey4,
-          },
-        })
+        extra_attr_ids.WinTilde = {
+          foreground = Screen.colors.NvimDarkGrey4,
+          background = bg,
+        }
+        extra_attr_ids.WinStatus = {
+          foreground = fg,
+          background = Screen.colors.NvimDarkGrey4,
+        }
       end
+      screen:add_extra_attr_ids(extra_attr_ids)
       fn.jobstart({
         nvim_prog,
         '--clean',
