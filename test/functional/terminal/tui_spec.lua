@@ -132,8 +132,6 @@ describe('TUI', function()
       '--cmd',
       nvim_set .. ' laststatus=2 background=dark',
     }, { env = env_notermguicolors })
-    tt.override_screen_expect_for_conpty(screen)
-
     feed_data('iZZZSENTINEL')
 
     -- Leave insert mode and run a job that writes directly to CON, blocking
@@ -172,7 +170,6 @@ describe('TUI :detach', function()
       '--cmd',
       nvim_set .. ' laststatus=2 background=dark',
     }, { env = env_notermguicolors })
-    tt.override_screen_expect_for_conpty(screen)
   end
 
   it('does not stop server', function()
@@ -1098,7 +1095,6 @@ describe('TUI', function()
   end)
 
   it('accepts resize while pager is active', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_exec2',
       [[
@@ -2387,7 +2383,6 @@ describe('TUI', function()
   end)
 
   it("paste: 'nomodifiable' buffer", function()
-    tt.override_screen_expect_for_conpty(screen)
     child_exec_lua([[
       vim.bo.modifiable = false
       -- Truncate the error message to hide the line number
@@ -2598,7 +2593,6 @@ describe('TUI', function()
   end)
 
   it('allows termguicolors to be set at runtime', function()
-    tt.override_screen_expect_for_conpty(screen)
     screen:set_option('rgb', true)
     feed_data(':hi SpecialKey ctermfg=3 guifg=SeaGreen\n')
     feed_data('i')
@@ -2793,7 +2787,6 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider ambiwidth chars than host terminal', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_buf_set_lines',
       0,
@@ -2838,7 +2831,6 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider non-ambiwidth chars than host terminal', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_buf_set_lines',
       0,
@@ -3366,7 +3358,7 @@ describe('TUI', function()
       -- so bg is dark.
       local fg = is_os('win') and Screen.colors.NvimLightGrey2 or Screen.colors.NvimDarkGrey2
       local bg = is_os('win') and Screen.colors.NvimDarkGrey2 or Screen.colors.NvimLightGrey2
-      screen:add_extra_attr_ids({
+      local extra_attr_ids = {
         BgOnly = {
           background = bg,
         },
@@ -3374,7 +3366,18 @@ describe('TUI', function()
           foreground = fg,
           background = bg,
         },
-      })
+      }
+      if is_os('win') then
+        extra_attr_ids.WinTilde = {
+          foreground = Screen.colors.NvimDarkGrey4,
+          background = bg,
+        }
+        extra_attr_ids.WinStatus = {
+          foreground = fg,
+          background = Screen.colors.NvimDarkGrey4,
+        }
+      end
+      screen:add_extra_attr_ids(extra_attr_ids)
       fn.jobstart({
         nvim_prog,
         '--clean',
@@ -3389,12 +3392,22 @@ describe('TUI', function()
         env = { VIMRUNTIME = os.getenv('VIMRUNTIME') },
       })
       if guicolors == 'termguicolors' then
-        screen:expect([[
-          {BgOnly:^                                                  }|
-          {BgOnly:                                                  }|*7
-          {100:foo}{BgOnly:                                               }|
-                                                            |
-        ]])
+        if is_os('win') then
+          screen:expect([[
+            {100:^                                                  }|
+            {WinTilde:~                                                 }|*6
+            {WinStatus:[No Name]                       0,0-1          All}|
+            {100:foo                                               }|
+                                                              |
+          ]])
+        else
+          screen:expect([[
+            {BgOnly:^                                                  }|
+            {BgOnly:                                                  }|*7
+            {100:foo}{BgOnly:                                               }|
+                                                              |
+          ]])
+        end
       else
         screen:expect([[
           ^                                                  |
@@ -3856,7 +3869,6 @@ describe('TUI FocusGained/FocusLost', function()
   end)
 
   it('in hit-enter prompt', function()
-    tt.override_screen_expect_for_conpty(screen)
     feed_data(":echom 'msg1'|echom 'msg2'|echom 'msg3'|echom 'msg4'|echom 'msg5'\n")
     screen:expect([[
       msg1                                              |
