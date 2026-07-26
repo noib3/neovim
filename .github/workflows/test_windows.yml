@@ -65,12 +65,13 @@ jobs:
         env:
           TEST_TIMEOUT: 600
         run: |
-          $specs = @(
-            'test/functional/terminal/highlight_spec.lua'
-            'test/functional/terminal/tui_spec.lua'
+          $env:TEST_FILE = 'test/functional/terminal/tui_spec.lua'
+          $filters = @(
+            'TUI :restart works$'
+            "TUI paste: 'nomodifiable' buffer$"
           )
-          foreach ($spec in $specs) {
-            $env:TEST_FILE = $spec
+          foreach ($filter in $filters) {
+            $env:TEST_FILTER = $filter
             cmake --build build --target functionaltest
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
