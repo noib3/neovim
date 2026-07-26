@@ -1771,13 +1771,16 @@ describe('TUI', function()
     else
       api.nvim_input_mouse('left', 'press', '', 0, 2, 6)
     end
-    screen:expect([[
+    local cleared_popup_row = is_os('win')
+        and '{100:~                                                 }'
+      or '{100:~}  {100:     }                                          '
+    screen:expect(([[
       ^popup menu test                                   |
-      {100:~}  {100:     }                                          |*3
+      %s|*3
       {3:[No Name] [+]                                     }|
       :let g:menustr = 'bar'                            |
       {5:-- TERMINAL --}                                    |
-    ]])
+    ]]):format(cleared_popup_row))
     if esc then
       feed_data('\027[<0;7;3m')
     else
@@ -1815,14 +1818,17 @@ describe('TUI', function()
     else
       api.nvim_input_mouse('right', 'release', '', 0, 5, 47)
     end
-    screen:expect([[
+    local cleared_popup_overlap_row = is_os('win')
+        and '{100:~                                                 }'
+      or '{100:~}  {100:     }                                   {100:     }  '
+    screen:expect(([[
       ^popup menu test                                   |
-      {100:~}  {100:     }                                          |*2
-      {100:~}  {100:     }                                   {100:     }  |
+      %s|*2
+      %s|
       {3:[No Name] [+]                                     }|
       :let g:menustr = 'baz'                            |
       {5:-- TERMINAL --}                                    |
-    ]])
+    ]]):format(cleared_popup_row, cleared_popup_overlap_row))
   end
 
   describe('mouse events work with right-click menu', function()
@@ -3367,6 +3373,18 @@ describe('TUI', function()
           background = bg,
         },
       })
+      if is_os('win') then
+        screen:add_extra_attr_ids({
+          WinTilde = {
+            foreground = Screen.colors.NvimDarkGrey4,
+            background = bg,
+          },
+          WinStatus = {
+            foreground = fg,
+            background = Screen.colors.NvimDarkGrey4,
+          },
+        })
+      end
       fn.jobstart({
         nvim_prog,
         '--clean',
@@ -3381,12 +3399,22 @@ describe('TUI', function()
         env = { VIMRUNTIME = os.getenv('VIMRUNTIME') },
       })
       if guicolors == 'termguicolors' then
-        screen:expect([[
-          {BgOnly:^                                                  }|
-          {BgOnly:                                                  }|*7
-          {100:foo}{BgOnly:                                               }|
-                                                            |
-        ]])
+        if is_os('win') then
+          screen:expect([[
+            {100:^                                                  }|
+            {WinTilde:~                                                 }|*6
+            {WinStatus:[No Name]                       0,0-1          All}|
+            {100:foo                                               }|
+                                                              |
+          ]])
+        else
+          screen:expect([[
+            {BgOnly:^                                                  }|
+            {BgOnly:                                                  }|*7
+            {100:foo}{BgOnly:                                               }|
+                                                              |
+          ]])
+        end
       else
         screen:expect([[
           ^                                                  |
