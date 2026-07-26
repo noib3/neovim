@@ -66,9 +66,6 @@ jobs:
           TEST_TIMEOUT: 600
         run: |
           $specs = @(
-            'test/functional/autocmd/focus_spec.lua'
-            'test/functional/ui/output_spec.lua'
-            'test/functional/terminal/buffer_spec.lua'
             'test/functional/terminal/highlight_spec.lua'
             'test/functional/terminal/tui_spec.lua'
           )
