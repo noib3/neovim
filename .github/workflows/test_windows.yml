@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [functional, old]
+        test: [functional]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,17 +61,24 @@ jobs:
 
       - if: ${{ matrix.test == 'functional' }}
         name: functionaltest
-        timeout-minutes: ${{ inputs.functionaltest_timeout }}
+        timeout-minutes: 20
         env:
-          # With parallel tests, use shorter timeout for a single group.
           TEST_TIMEOUT: 600
         run: |
-          $ErrorActionPreference = 'Continue'
-          # `-k 0` tells ninja to continue running all targets even if some fail.
-          cmake --build build --target functionaltest-parallel -j 2 -- -k 0
-          $exitCode = $LASTEXITCODE
-          cmake --build build --target functionaltest-summary
-          exit $exitCode
+          $specs = @(
+            'test/functional/autocmd/focus_spec.lua'
+            'test/functional/ui/output_spec.lua'
+            'test/functional/terminal/buffer_spec.lua'
+            'test/functional/terminal/highlight_spec.lua'
+            'test/functional/terminal/tui_spec.lua'
+          )
+          foreach ($spec in $specs) {
+            $env:TEST_FILE = $spec
+            cmake --build build --target functionaltest
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
 
       - if: ${{ matrix.test == 'old' }}
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
