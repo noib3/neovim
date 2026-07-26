@@ -226,6 +226,7 @@ function M.override_screen_expect_for_conpty(screen)
       -- Ignore attribute groups that contain only blank cells. ConPTY may
       -- merge them into either adjacent group, so retaining the group itself
       -- makes the patterns below require a boundary that may not exist.
+      expected = expected:gsub('(\n[ \t]*){[^{}\n]-: +}(%|%*?%d*)', '%1{MATCH:[^|]*}%2')
       expected = expected:gsub('{[^{}\n]-: +}', ' ')
       expected = expected:gsub('%}%^ +', '{MATCH:[^|]*%%^[^|]*}')
       expected = expected:gsub(' +%} *', '{MATCH: *}}{MATCH:[^|]*}')
