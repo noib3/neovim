@@ -132,7 +132,6 @@ describe('TUI', function()
       '--cmd',
       nvim_set .. ' laststatus=2 background=dark',
     }, { env = env_notermguicolors })
-    tt.override_screen_expect_for_conpty(screen)
     feed_data('iZZZSENTINEL')
 
     -- Leave insert mode and run a job that writes directly to CON, blocking
@@ -171,7 +170,6 @@ describe('TUI :detach', function()
       '--cmd',
       nvim_set .. ' laststatus=2 background=dark',
     }, { env = env_notermguicolors })
-    tt.override_screen_expect_for_conpty(screen)
   end
 
   it('does not stop server', function()
@@ -1097,7 +1095,6 @@ describe('TUI', function()
   end)
 
   it('accepts resize while pager is active', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_exec2',
       [[
@@ -2386,7 +2383,6 @@ describe('TUI', function()
   end)
 
   it("paste: 'nomodifiable' buffer", function()
-    tt.override_screen_expect_for_conpty(screen)
     child_exec_lua([[
       vim.bo.modifiable = false
       -- Truncate the error message to hide the line number
@@ -2597,7 +2593,6 @@ describe('TUI', function()
   end)
 
   it('allows termguicolors to be set at runtime', function()
-    tt.override_screen_expect_for_conpty(screen)
     screen:set_option('rgb', true)
     feed_data(':hi SpecialKey ctermfg=3 guifg=SeaGreen\n')
     feed_data('i')
@@ -2792,7 +2787,6 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider ambiwidth chars than host terminal', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_buf_set_lines',
       0,
@@ -2837,7 +2831,6 @@ describe('TUI', function()
   end)
 
   it('allows grid to assume wider non-ambiwidth chars than host terminal', function()
-    tt.override_screen_expect_for_conpty(screen)
     child_session:request(
       'nvim_buf_set_lines',
       0,
@@ -3855,7 +3848,6 @@ describe('TUI FocusGained/FocusLost', function()
   end)
 
   it('in hit-enter prompt', function()
-    tt.override_screen_expect_for_conpty(screen)
     feed_data(":echom 'msg1'|echom 'msg2'|echom 'msg3'|echom 'msg4'|echom 'msg5'\n")
     screen:expect([[
       msg1                                              |
