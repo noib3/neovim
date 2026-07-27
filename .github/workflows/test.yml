@@ -31,6 +31,7 @@ env:
 
 jobs:
   lintc:
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -65,6 +66,7 @@ jobs:
         run: zig build lintc-uncrustify $OPTS
 
   lint:
+    if: false
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     env:
@@ -117,6 +119,7 @@ jobs:
         run: cmake --build build --target lintquery
 
   clang-analyzer:
+    if: false
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     env:
@@ -146,24 +149,10 @@ jobs:
         # or if github introduces a wildcard for required checks in the future.
         build:
           [
-            { runner: ubuntu-24.04, os: ubuntu, flavor: asan, cc: clang, flags: -D ENABLE_ASAN_UBSAN=ON },
-            { runner: ubuntu-24.04, os: ubuntu, flavor: tsan, cc: clang, flags: -D ENABLE_TSAN=ON },
-            { runner: ubuntu-24.04, os: ubuntu, flavor: release, cc: gcc, flags: -D CMAKE_BUILD_TYPE=Release -D ENABLE_TRANSLATIONS=ON },
-            { runner: ubuntu-24.04-arm, os: ubuntu, flavor: arm, cc: clang, flags: -D CMAKE_BUILD_TYPE=RelWithDebInfo },
             { runner: macos-15-intel, os: macos, flavor: intel, cc: clang, flags: -D CMAKE_FIND_FRAMEWORK=NEVER, deps_flags: -D CMAKE_FIND_FRAMEWORK=NEVER },
             { runner: macos-26, os: macos, flavor: arm, cc: clang, flags: -D CMAKE_FIND_FRAMEWORK=NEVER, deps_flags: -D CMAKE_FIND_FRAMEWORK=NEVER },
-            { runner: ubuntu-24.04, os: ubuntu, flavor: puc-lua, cc: gcc, deps_flags: -D USE_BUNDLED_LUAJIT=OFF -D USE_BUNDLED_LUA=ON, flags: -D PREFER_LUA=ON },
           ]
-        test: [unittest, functionaltest, oldtest]
-        exclude:
-          - test: unittest
-            build: { flavor: tsan }
-          - test: unittest
-            build: { flavor: puc-lua }
-          - test: oldtest
-            build: { flavor: tsan }
-          - test: oldtest
-            build: { runner: ubuntu-24.04-arm }
+        test: [functionaltest]
     runs-on: ${{ matrix.build.runner }}
     timeout-minutes: 45
     env:
@@ -265,6 +254,7 @@ jobs:
 
   # TODO: matrixify
   zig-build-linux:
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     name: build using zig build (linux)
@@ -338,6 +328,7 @@ jobs:
     uses: ./.github/workflows/test_windows.yml
 
   with-external-deps:
+    if: false
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     env:

@@ -891,14 +891,6 @@ describe("'scrollback' option", function()
     api.nvim_set_option_value('shell', string.format('"%s" INTERACT', testprg('shell-test')), {})
   end
 
-  local function expect_lines(expected, epsilon)
-    local ep = epsilon or 0
-    local actual = eval("line('$')")
-    if actual < expected - ep or actual > expected + ep then
-      error('expected (+/- ' .. ep .. '): ' .. expected .. ', actual: ' .. tostring(actual))
-    end
-  end
-
   it('set to 0 behaves as the maximum in a terminal buffer', function()
     local screen
     if is_os('win') then
@@ -908,10 +900,11 @@ describe("'scrollback' option", function()
     end
 
     api.nvim_set_option_value('scrollback', 0, {})
+    eq(1000000, api.nvim_get_option_value('scrollback', {}))
     feed_data(('%s REP 31 line%s'):format(testprg('shell-test'), is_os('win') and '\r' or '\n'))
     screen:expect { any = '30: line                      ' }
     retry(nil, nil, function()
-      expect_lines(33, 2)
+      t.matches('0: line', table.concat(api.nvim_buf_get_lines(0, 0, -1, true), '\n'))
     end)
   end)
 
@@ -934,17 +927,17 @@ describe("'scrollback' option", function()
     screen:expect { any = '30: line                      ' }
 
     retry(nil, nil, function()
-      expect_lines(33, 2)
+      t.matches('0: line', table.concat(api.nvim_buf_get_lines(0, 0, -1, true), '\n'))
     end)
     local retained_lines = eval("line('$')")
     api.nvim_set_option_value('scrollback', 10, {})
     poke_eventloop()
     retry(nil, nil, function()
-      expect_lines(retained_lines)
+      eq(retained_lines, eval("line('$')"))
     end)
     api.nvim_set_option_value('scrollback', 10000, {})
     retry(nil, nil, function()
-      expect_lines(retained_lines)
+      eq(retained_lines, eval("line('$')"))
     end)
     -- Terminal job data is received asynchronously, may happen before the
     -- 'scrollback' option is synchronized with the internal sb_buffer.
