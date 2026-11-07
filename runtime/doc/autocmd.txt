@@ -321,6 +321,10 @@ BufRead or BufReadPost				*BufRead* *BufReadPost*
 				Not triggered:
 				- for the `:read file` command
 				- when the file doesn't exist
+				- when reloading a buffer whose file changed,
+				  unless a |BufReadPre| or |BufReadCmd|
+				  autocommand matches the file, see
+				  |timestamp-reload|
 
 BufReadCmd						*BufReadCmd*
 				Before starting to edit a new buffer.  Should

@@ -653,6 +653,11 @@ These existing features changed their behavior.
   can be used when printing to a terminal.
 • It is no longer allowed to change the window layout during a |DiffUpdated|
   autocommand.
+• Reloading a buffer whose file changed outside of Nvim (|timestamp|) applies
+  the changes as edits of its lines. Extmarks and marks stay on their text,
+  and |nvim_buf_attach()| callbacks get `on_lines` and `on_bytes` instead of
+  `on_reload`. |BufReadPost| is not triggered, unless a |BufReadPre| or
+  |BufReadCmd| autocommand matches the file.
 
 ==============================================================================
 REMOVED FEATURES                                                 *news-removed*

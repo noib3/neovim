@@ -1550,6 +1550,21 @@ all loaded buffers when 'autoread' is set.  This means files are reloaded
 promptly without waiting for |FocusGained| or |:checktime|.  The watchers
 are managed automatically: started when a buffer is loaded, restarted after
 |:write|, and stopped when the buffer is deleted or 'autoread' is disabled.
+
+							*timestamp-reload*
+Reloading a buffer applies the changes in the file as edits of its lines.
+|extmarks| and marks move with the text around them, |u| undoes the reload
+in one step, and |nvim_buf_attach()| callbacks get the edits.  |BufReadPre|
+and |BufReadPost| are not triggered.  The whole text is replaced as when
+editing the file instead:
+- when a |BufReadCmd| autocommand matches the file, which reads the file
+  itself.
+- when a |BufReadPre| autocommand matches the file, which can start a
+  conversion that a |BufReadPost| autocommand finishes, like decompressing
+  the file (see |gzip-example|).
+- when the options are detected again ("Load File and Options", or
+  |v:fcs_choice| set to "edit").
+|FileChangedShellPost| is triggered after the buffer is reloaded.
 							*ignore-timestamp*
 If you do not want to be asked or automatically reload the file, you can use
 this: >
