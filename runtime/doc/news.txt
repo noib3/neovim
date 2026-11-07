@@ -655,6 +655,9 @@ These existing features changed their behavior.
   autocommand.
 • Formatting ignores inline virtual text (|nvim_buf_set_extmark()| with
   `virt_text_pos="inline"`) when measuring lines against 'textwidth'.
+• |gq| only changes the lines whose wrapping changes. Formatting text that is
+  already formatted doesn't modify the buffer, and extmarks stay on their
+  text.
 
 ==============================================================================
 REMOVED FEATURES                                                 *news-removed*
