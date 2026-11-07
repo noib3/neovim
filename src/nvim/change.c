@@ -982,109 +982,36 @@ int del_bytes(colnr_T count, bool fixpos_arg, bool use_delcombine)
   return OK;
 }
 
-/// open_line: Add a new line below or above the current line.
+/// The indent and comment leader of the line that open_line() opens before or after the line
+/// "saved_line".
 ///
-/// For MODE_VREPLACE state, we only add a new line when we get to the end of
-/// the file, otherwise we just start replacing the next line.
-///
-/// Caller must take care of undo.  Since MODE_VREPLACE may affect any number of
-/// lines however, it may call u_save_cursor() again when starting to change a
-/// new line.
-/// "flags": OPENLINE_DELSPACES delete spaces after cursor
-///          OPENLINE_DO_COM    format comments
-///          OPENLINE_KEEPTRAIL keep trailing spaces
-///          OPENLINE_MARKFIX   adjust mark positions after the line break
-///          OPENLINE_COM_LIST  format comments with list or 2nd line indent
-///          OPENLINE_FORCE_INDENT  set indent from second_line_indent, ignore 'autoindent'
-///
-/// "second_line_indent": indent for after ^^D in Insert mode or if flag
-///                       OPENLINE_COM_LIST
-/// "did_do_comment" is set to true when intentionally putting the comment
-/// leader in front of the new line.
-///
-/// @param dir  FORWARD or BACKWARD
-///
-/// @return true on success, false on failure
-bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
+/// @param first_char  first non-white character of the text that moves to the new line, or NUL
+/// @param ins  Insert mode state that the new line's indent updates
+/// @param[out] did_do_comment  set to true when the leader comes from a comment after code
+NewLineLeader new_line_leader(int dir, int flags, int second_line_indent, char *saved_line,
+                              int first_char, InsState *ins, bool *did_do_comment)
 {
-  char *next_line = NULL;         // copy of the next line
-  char *p_extra = NULL;           // what goes to next line
-  colnr_T less_cols = 0;          // less columns for mark in new line
-  colnr_T less_cols_off = 0;      // columns to skip for mark and
-                                  // extmark adjustment
-  pos_T old_cursor;               // old cursor position
-  colnr_T newcol = 0;             // new cursor column
   int newindent = 0;              // auto-indent of the new line
-  bool trunc_line = false;        // truncate current line afterwards
-  bool retval = false;            // return value
-  int extra_len = 0;              // length of p_extra string
+  colnr_T newcol = 0;             // new cursor column
   int lead_len;                   // length of comment leader
   int comment_start = 0;          // start index of the comment leader
   char *lead_flags;               // position in 'comments' for comment leader
   char *leader = NULL;            // copy of comment leader
   char *allocated = NULL;         // allocated memory
   char *p;
-  char saved_char = NUL;          // init for GCC
   pos_T *pos;
+  pos_T old_cursor;
   bool do_si = may_do_si();
-  bool no_si = false;             // reset Ins.did_si afterwards
-  int first_char = NUL;           // init for GCC
-  int vreplace_mode;
-  bool did_append;                // appended a new line
-  int saved_pi = curbuf->b_p_pi;  // copy of preserveindent setting
+  bool no_si = false;             // reset ins->did_si afterwards
+  bool trunc_line = false;        // truncate current line afterwards
 
-  linenr_T lnum = curwin->w_cursor.lnum;
-  colnr_T mincol = curwin->w_cursor.col + 1;
-
-  // make a copy of the current line so we can mess with it
-  char *saved_line = xstrnsave(get_cursor_line_ptr(), (size_t)get_cursor_line_len());
-
-  if (State & VREPLACE_FLAG) {
-    // With MODE_VREPLACE we make a copy of the next line, which we will be
-    // starting to replace.  First make the new line empty and let vim play
-    // with the indenting and comment leader to its heart's content.  Then
-    // we grab what it ended up putting on the new line, put back the
-    // original line, and call ins_char() to put each new character onto
-    // the line, replacing what was there before and pushing the right
-    // stuff onto the replace stack.  -- webb.
-    if (curwin->w_cursor.lnum < orig_line_count) {
-      next_line = xstrnsave(ml_get(curwin->w_cursor.lnum + 1),
-                            (size_t)ml_get_len(curwin->w_cursor.lnum + 1));
-    } else {
-      next_line = xstrdup("");
-    }
-
-    // In MODE_VREPLACE state, a NL replaces the rest of the line, and
-    // starts replacing the next line, so push all of the characters left
-    // on the line onto the replace stack.  We'll push any other characters
-    // that might be replaced at the start of the next line (due to
-    // autoindent etc) a bit later.
-    replace_push_nul();      // Call twice because BS over NL expects it
-    replace_push_nul();
-    p = saved_line + curwin->w_cursor.col;
-    replace_push(p, strlen(p));
-    saved_line[curwin->w_cursor.col] = NUL;
-  }
-
-  if ((State & MODE_INSERT) && (State & VREPLACE_FLAG) == 0) {
-    p_extra = saved_line + curwin->w_cursor.col;
-    if (do_si) {  // need first char after new line break
-      p = skipwhite(p_extra);
-      first_char = (unsigned char)(*p);
-    }
-    extra_len = (int)strlen(p_extra);
-    saved_char = *p_extra;
-    *p_extra = NUL;
-  }
-
-  u_clearline(curbuf);  // cannot do "U" command when adding lines
-  Ins.did_si = false;
-  Ins.ai_col = 0;
+  ins->did_si = false;
+  ins->ai_col = 0;
 
   // If we just did an auto-indent, then we didn't type anything on
   // the prior line, and it should be truncated.  Do this even if 'ai' is not
-  // set because automatically inserting a comment leader also sets Ins.did_ai.
-  if (dir == FORWARD && Ins.did_ai) {
+  // set because automatically inserting a comment leader also sets ins->did_ai.
+  if (dir == FORWARD && ins->did_ai) {
     trunc_line = true;
   }
 
@@ -1104,8 +1031,7 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
     // we may move some text to the next line. If it starts with '{'
     // don't add an indent. Fixes inserting a NL before '{' in line
     //   "if (condition) {"
-    if (!trunc_line && do_si && *saved_line != NUL
-        && (p_extra == NULL || first_char != '{')) {
+    if (!trunc_line && do_si && *saved_line != NUL && first_char != '{') {
       old_cursor = curwin->w_cursor;
       char *ptr = saved_line;
       if (flags & OPENLINE_DO_COM) {
@@ -1189,14 +1115,14 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
           // If last character is '{' do indent, without
           // checking for "if" and the like.
           if (last_char == '{') {
-            Ins.did_si = true;              // do indent
+            ins->did_si = true;              // do indent
             no_si = true;               // don't delete it when '{' typed
             // Look for "if" and the like, use 'cinwords'.
             // Don't do this if the previous line ended in ';' or
             // '}'.
           } else if (last_char != ';' && last_char != '}'
                      && cin_is_cinword(ptr)) {
-            Ins.did_si = true;
+            ins->did_si = true;
           }
         }
       } else {  // dir == BACKWARD
@@ -1222,18 +1148,18 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
         }
         p = skipwhite(ptr);
         if (*p == '}') {            // if line starts with '}': do indent
-          Ins.did_si = true;
+          ins->did_si = true;
         } else {                    // can delete indent when '{' typed
-          Ins.can_si_back = true;
+          ins->can_si_back = true;
         }
       }
       curwin->w_cursor = old_cursor;
     }
     if (do_si) {
-      Ins.can_si = true;
+      ins->can_si = true;
     }
 
-    Ins.did_ai = true;
+    ins->did_ai = true;
   }
 
   // May do indenting after opening a new line.
@@ -1244,7 +1170,7 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
 
   // Find out if the current line starts with a comment leader.
   // This may then be inserted in front of the new line.
-  Ins.end_comment_pending = NUL;
+  ins->end_comment_pending = NUL;
   if (flags & OPENLINE_DO_COM) {
     lead_len = get_leader_len(saved_line, &lead_flags, dir == BACKWARD, true);
     if (lead_len == 0 && curbuf->b_p_cin && do_cindent && dir == FORWARD
@@ -1308,14 +1234,14 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
         while (*p && p[-1] != ':') {  // find end of end flags
           // Check whether we allow automatic ending of comments
           if (*p == COM_AUTO_END) {
-            Ins.end_comment_pending = -1;  // means we want to set it
+            ins->end_comment_pending = -1;  // means we want to set it
           }
           p++;
         }
         size_t n = copy_option_part(&p, lead_end, COM_MAX_LEN, ",");
 
-        if (Ins.end_comment_pending == -1) {  // we can set it now
-          Ins.end_comment_pending = (unsigned char)lead_end[n - 1];
+        if (ins->end_comment_pending == -1) {  // we can set it now
+          ins->end_comment_pending = (unsigned char)lead_end[n - 1];
         }
 
         // If the end of the comment is in the same line, don't use
@@ -1341,11 +1267,7 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
           // comment leader, then put a space after the middle
           // comment leader on the next line.
           if (!ascii_iswhite(saved_line[lead_len - 1])
-              && ((p_extra != NULL
-                   && (int)curwin->w_cursor.col == lead_len)
-                  || (p_extra == NULL
-                      && saved_line[lead_len] == NUL)
-                  || require_blank)) {
+              && (saved_line[lead_len] == NUL || require_blank)) {
             extra_space = true;
           }
         }
@@ -1377,15 +1299,15 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
         // Check whether we allow automatic ending of comments
         for (p2 = p; *p2 && *p2 != ':'; p2++) {
           if (*p2 == COM_AUTO_END) {
-            Ins.end_comment_pending = -1;  // means we want to set it
+            ins->end_comment_pending = -1;  // means we want to set it
           }
         }
-        if (Ins.end_comment_pending == -1) {
+        if (ins->end_comment_pending == -1) {
           // Find last character in end-comment string
           while (*p2 && *p2 != ',') {
             p2++;
           }
-          Ins.end_comment_pending = (unsigned char)p2[-1];
+          ins->end_comment_pending = (unsigned char)p2[-1];
         }
         break;
       }
@@ -1402,11 +1324,10 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
       }
     }
     if (lead_len > 0) {
-      // allocate buffer (may concatenate p_extra later)
+      // allocate buffer (may add padding later)
       int bytes = lead_len
                   + lead_repl_len
                   + extra_space
-                  + extra_len
                   + (second_line_indent > 0 ? second_line_indent : 0)
                   + 1;
       assert(bytes >= 0);
@@ -1578,14 +1499,14 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
 
       // if a new indent will be set below, remove the indent that
       // is in the comment leader
-      if (newindent || Ins.did_si) {
+      if (newindent || ins->did_si) {
         while (lead_len && ascii_iswhite(*leader)) {
           lead_len--;
           newcol--;
           leader++;
         }
       }
-      Ins.did_si = Ins.can_si = false;
+      ins->did_si = ins->can_si = false;
     } else if (comment_end != NULL) {
       // We have finished a comment, so we don't use the leader.
       // If this was a C-comment and 'ai' or 'si' is set do a normal
@@ -1603,6 +1524,118 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
       }
     }
   }
+
+  return (NewLineLeader){
+    .indent = newindent,
+    .leader = leader,
+    .allocated = allocated,
+    .lead_len = lead_len,
+    .col = newcol,
+    .no_si = no_si,
+    .do_cindent = do_cindent,
+  };
+}
+
+/// open_line: Add a new line below or above the current line.
+///
+/// For MODE_VREPLACE state, we only add a new line when we get to the end of
+/// the file, otherwise we just start replacing the next line.
+///
+/// Caller must take care of undo.  Since MODE_VREPLACE may affect any number of
+/// lines however, it may call u_save_cursor() again when starting to change a
+/// new line.
+/// "flags": OPENLINE_DELSPACES delete spaces after cursor
+///          OPENLINE_DO_COM    format comments
+///          OPENLINE_KEEPTRAIL keep trailing spaces
+///          OPENLINE_MARKFIX   adjust mark positions after the line break
+///          OPENLINE_COM_LIST  format comments with list or 2nd line indent
+///          OPENLINE_FORCE_INDENT  set indent from second_line_indent, ignore 'autoindent'
+///
+/// "second_line_indent": indent for after ^^D in Insert mode or if flag
+///                       OPENLINE_COM_LIST
+/// "did_do_comment" is set to true when intentionally putting the comment
+/// leader in front of the new line.
+///
+/// @param dir  FORWARD or BACKWARD
+///
+/// @return true on success, false on failure
+bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
+{
+  char *next_line = NULL;         // copy of the next line
+  char *p_extra = NULL;           // what goes to next line
+  colnr_T less_cols = 0;          // less columns for mark in new line
+  colnr_T less_cols_off = 0;      // columns to skip for mark and
+                                  // extmark adjustment
+  pos_T old_cursor;               // old cursor position
+  bool trunc_line = false;        // truncate current line afterwards
+  bool retval = false;            // return value
+  char *allocated = NULL;         // allocated memory
+  char *p;
+  char saved_char = NUL;          // init for GCC
+  bool do_si = may_do_si();
+  int first_char = NUL;           // init for GCC
+  int vreplace_mode;
+  bool did_append;                // appended a new line
+  int saved_pi = curbuf->b_p_pi;  // copy of preserveindent setting
+
+  linenr_T lnum = curwin->w_cursor.lnum;
+  colnr_T mincol = curwin->w_cursor.col + 1;
+
+  // make a copy of the current line so we can mess with it
+  char *saved_line = xstrnsave(get_cursor_line_ptr(), (size_t)get_cursor_line_len());
+
+  if (State & VREPLACE_FLAG) {
+    // With MODE_VREPLACE we make a copy of the next line, which we will be
+    // starting to replace.  First make the new line empty and let vim play
+    // with the indenting and comment leader to its heart's content.  Then
+    // we grab what it ended up putting on the new line, put back the
+    // original line, and call ins_char() to put each new character onto
+    // the line, replacing what was there before and pushing the right
+    // stuff onto the replace stack.  -- webb.
+    if (curwin->w_cursor.lnum < orig_line_count) {
+      next_line = xstrnsave(ml_get(curwin->w_cursor.lnum + 1),
+                            (size_t)ml_get_len(curwin->w_cursor.lnum + 1));
+    } else {
+      next_line = xstrdup("");
+    }
+
+    // In MODE_VREPLACE state, a NL replaces the rest of the line, and
+    // starts replacing the next line, so push all of the characters left
+    // on the line onto the replace stack.  We'll push any other characters
+    // that might be replaced at the start of the next line (due to
+    // autoindent etc) a bit later.
+    replace_push_nul();      // Call twice because BS over NL expects it
+    replace_push_nul();
+    p = saved_line + curwin->w_cursor.col;
+    replace_push(p, strlen(p));
+    saved_line[curwin->w_cursor.col] = NUL;
+  }
+
+  if ((State & MODE_INSERT) && (State & VREPLACE_FLAG) == 0) {
+    p_extra = saved_line + curwin->w_cursor.col;
+    if (do_si) {  // need first char after new line break
+      p = skipwhite(p_extra);
+      first_char = (unsigned char)(*p);
+    }
+    saved_char = *p_extra;
+    *p_extra = NUL;
+  }
+
+  u_clearline(curbuf);  // cannot do "U" command when adding lines
+
+  // If we just did an auto-indent, then we didn't type anything on
+  // the prior line, and it should be truncated.  Do this even if 'ai' is not
+  // set because automatically inserting a comment leader also sets Ins.did_ai.
+  if (dir == FORWARD && Ins.did_ai) {
+    trunc_line = true;
+  }
+
+  NewLineLeader nl = new_line_leader(dir, flags, second_line_indent, saved_line, first_char, &Ins,
+                                     did_do_comment);
+  int newindent = nl.indent;      // auto-indent of the new line
+  colnr_T newcol = nl.col;        // new cursor column
+  int lead_len = nl.lead_len;     // length of comment leader
+  char *leader = nl.leader;       // copy of comment leader
 
   // (State == MODE_INSERT || State == MODE_REPLACE), only when dir == FORWARD
   if (p_extra != NULL) {
@@ -1651,8 +1684,8 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
         newcol++;
       }
     }
-    strcat(leader, p_extra);
-    p_extra = leader;
+    allocated = concat_str(leader, p_extra);
+    p_extra = allocated;
     Ins.did_ai = true;          // So truncating blanks works with comments
     less_cols -= lead_len;
   } else {
@@ -1742,7 +1775,7 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
       }
     }
     newcol += curwin->w_cursor.col;
-    if (no_si) {
+    if (nl.no_si) {
       Ins.did_si = false;
     }
   }
@@ -1836,7 +1869,7 @@ bool open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
       // do lisp indenting
       fixthisline(get_lisp_indent);
       Ins.ai_col = (colnr_T)getwhitecols_curline();
-    } else if (do_cindent || (curbuf->b_p_ai && use_indentexpr_for_lisp())) {
+    } else if (nl.do_cindent || (curbuf->b_p_ai && use_indentexpr_for_lisp())) {
       // do 'cindent' or 'indentexpr' indenting
       do_c_expr_indent();
       Ins.ai_col = (colnr_T)getwhitecols_curline();
@@ -1871,6 +1904,7 @@ theend:
   xfree(saved_line);
   xfree(next_line);
   xfree(allocated);
+  xfree(nl.allocated);
   xfree(prompt_moved);
   cmdmod.cmod_flags = old_cmod_flags;
   return retval;

@@ -636,6 +636,9 @@ coerced to strings. See |id()| for more details, currently it uses
 
 |CursorMoved| triggers when moving between windows.
 
+|gq| only changes the lines whose wrapping changes, so formatting text that is
+already formatted doesn't modify the buffer.
+
 Lua interface (|lua.txt|):
 - `:lua print("a\0b")` will print `a^@b`, like with `:echomsg "a\nb"` . In Vim
   that prints `a` and `b` on separate lines, exactly like
