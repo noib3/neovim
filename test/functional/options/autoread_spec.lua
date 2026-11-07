@@ -282,3 +282,93 @@ describe('autoread file watcher', function()
     end)
   end)
 end)
+
+describe('FileRenamed', function()
+  before_each(function()
+    clear({ args = { '--clean' } })
+    shorten_debounce()
+    n.exec_lua(function()
+      _G.renames = {}
+      vim.api.nvim_create_autocmd('FileRenamed', {
+        callback = function(ev)
+          table.insert(_G.renames, { buf = ev.buf, data = ev.data })
+          if _G.follow then
+            vim.cmd.file({ ev.data.new, magic = { file = false }, mods = { keepalt = true } })
+          end
+        end,
+      })
+    end)
+  end)
+
+  local function renames()
+    return n.exec_lua('return _G.renames')
+  end
+
+  it('lets the buffer follow a renamed file', function()
+    n.exec_lua('_G.follow = true')
+    local path = open_watched('original\n')
+    local bufnr = api.nvim_get_current_buf()
+    local old = api.nvim_buf_get_name(0)
+    local new = old .. '-renamed'
+    t.finally(function()
+      os.remove(path .. '-renamed')
+    end)
+
+    assert(vim.uv.fs_rename(path, path .. '-renamed'))
+    retry(nil, 3000, function()
+      eq(new, api.nvim_buf_get_name(0))
+    end)
+    eq({ { buf = bufnr, data = { old = old, new = new } } }, renames())
+    eq(new, watched_path())
+    eq('', n.eval('v:errmsg'))
+
+    -- The watcher follows the file.
+    write_file(path .. '-renamed', 'changed\n')
+    retry(nil, 3000, function()
+      eq({ 'changed' }, api.nvim_buf_get_lines(0, 0, -1, true))
+    end)
+
+    -- The buffer can be written to its new name.
+    api.nvim_buf_set_lines(0, 0, -1, true, { 'written' })
+    command('write')
+    eq('written\n', t.read_file(path .. '-renamed'))
+  end)
+
+  it('keeps the buffer name if no autocommand renames the buffer', function()
+    local path = open_watched('original\n')
+    local old = api.nvim_buf_get_name(0)
+    t.finally(function()
+      os.remove(path .. '-renamed')
+    end)
+
+    assert(vim.uv.fs_rename(path, path .. '-renamed'))
+    retry(nil, 3000, function()
+      eq(1, #renames())
+      eq(false, is_watching())
+    end)
+    eq(old, api.nvim_buf_get_name(0))
+  end)
+
+  it('is not triggered by saves that replace the file', function()
+    local path = open_watched('original\n')
+
+    -- Atomic save: write a temp file, rename it over the file.
+    write_file(path .. '.tmp', 'atomic\n')
+    assert(vim.uv.fs_rename(path .. '.tmp', path))
+    retry(nil, 3000, function()
+      eq({ 'atomic' }, api.nvim_buf_get_lines(0, 0, -1, true))
+    end)
+
+    -- Backup save: rename the file to a backup, write a new file.
+    t.finally(function()
+      os.remove(path .. '~')
+    end)
+    assert(vim.uv.fs_rename(path, path .. '~'))
+    write_file(path, 'backup\n')
+    retry(nil, 3000, function()
+      eq({ 'backup' }, api.nvim_buf_get_lines(0, 0, -1, true))
+    end)
+
+    eq({}, renames())
+  end)
+end)
