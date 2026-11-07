@@ -22,6 +22,10 @@ error('Cannot require a meta file')
 --- @field type 'excmd'|'insert'|'jump'|'mapping'|'motion'|'mouse'|'normal'|'operator'|'scroll'|'visual'
 --- @field undoseq? integer Undo state after the action (`undotree().seq_cur`). Decreases on undo.
 
+--- @class vim.event.filerenamed.data
+--- @field old string
+--- @field new string
+
 --- @class vim.event.lspattach.data
 --- @field client_id integer
 

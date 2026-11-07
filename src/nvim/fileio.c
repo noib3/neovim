@@ -3361,6 +3361,8 @@ void buf_store_file_info(buf_T *buf, FileInfo *file_info)
   buf->b_mtime_ns = file_info->stat.st_mtim.tv_nsec;
   buf->b_orig_size = os_fileinfo_size(file_info);
   buf->b_orig_mode = (int)file_info->stat.st_mode;
+  os_fileinfo_id(file_info, &buf->file_id);
+  buf->file_id_valid = true;
 }
 
 /// Adjust the line with missing eol, used for the next write.

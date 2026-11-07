@@ -58,6 +58,7 @@ return {
     FileReadCmd = true, -- read from a file using command
     FileReadPost = true, -- after reading a file
     FileReadPre = true, -- before reading a file
+    FileRenamed = true, -- after a watched file was renamed
     FileType = true, -- new file type detected (user defined)
     FileWriteCmd = true, -- write to a file using command
     FileWritePost = true, -- after writing a file
@@ -163,6 +164,7 @@ return {
   --- List of Nvim-specific events or aliases for generating syntax file.
   nvim_specific = {
     DiagnosticChanged = true,
+    FileRenamed = true,
     LspAttach = true,
     LspDetach = true,
     LspNotify = true,

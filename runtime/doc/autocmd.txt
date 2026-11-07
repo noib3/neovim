@@ -813,6 +813,38 @@ FileReadPost						*FileReadPost*
 FileReadPre						*FileReadPre*
 				Before reading a file with a ":read" command.
 
+FileRenamed						*FileRenamed*
+				After the file of a buffer watched by
+				'autoread' was renamed within its directory
+				while the buffer kept its name, e.g. with
+				|rename()| or `mv` in a shell. Not triggered
+				when the buffer is renamed along with the
+				file, e.g. by |vim.lsp.util.rename()|.
+				The pattern is matched against the old file
+				name. The buffer keeps its name unless
+				the autocommand renames it, which |:file_f|
+				does without marking the buffer
+				|not-edited|.
+
+				The |event-data| has these keys (type:
+				`vim.event.filerenamed.data`):
+				- old: full path of the file before the rename
+				- new: full path of the file after the rename
+
+				Example: make buffers follow the renames of
+				their files: >lua
+				    vim.api.nvim_create_autocmd('FileRenamed', {
+				      nested = true, -- trigger BufFilePost
+				      callback = function(ev)
+				        vim.cmd.file({
+				          ev.data.new,
+				          magic = { file = false },
+				          mods = { keepalt = true },
+				        })
+				      end,
+				    })
+<
+
 FileType						*FileType*
 				When the 'filetype' option has been set.  The
 				pattern is matched against the filetype.

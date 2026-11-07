@@ -365,6 +365,8 @@ EVENTS
 • |TabMoved| is triggered when tabs are reordered.
 • |DirReadPost| is triggered after each |dir| listing is rendered, so it can
   be sorted or filtered. See |dir-render|.
+• |FileRenamed| is triggered when the file of an 'autoread' buffer is renamed
+  but the buffer isn't, so the buffer can follow it.
 
 HIGHLIGHTS
 
