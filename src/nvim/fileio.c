@@ -16,6 +16,7 @@
 #include <uv.h>
 
 #include "auto/config.h"
+#include "klib/kvec.h"
 #include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
 #include "nvim/autocmd_defs.h"
@@ -33,6 +34,8 @@
 #include "nvim/eval/vars.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_eval.h"
+#include "nvim/extmark.h"
+#include "nvim/extmark_defs.h"
 #include "nvim/fileio.h"
 #include "nvim/fold.h"
 #include "nvim/garray.h"
@@ -45,6 +48,8 @@
 #include "nvim/insert.h"
 #include "nvim/log.h"
 #include "nvim/macros_defs.h"
+#include "nvim/mark.h"
+#include "nvim/mark_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/mbyte_defs.h"
 #include "nvim/mcursor.h"
@@ -55,6 +60,7 @@
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/move.h"
+#include "nvim/ops.h"
 #include "nvim/option.h"
 #include "nvim/option_defs.h"
 #include "nvim/option_vars.h"
@@ -77,6 +83,7 @@
 #include "nvim/undo.h"
 #include "nvim/undo_defs.h"
 #include "nvim/vim_defs.h"
+#include "xdiff/xdiff.h"
 
 #ifdef BACKSLASH_IN_FILENAME
 # include "nvim/charset.h"
@@ -99,6 +106,44 @@
 #ifndef UV_FS_COPYFILE_FICLONE
 # define UV_FS_COPYFILE_FICLONE 0
 #endif
+
+/// A step that turns the old lines of a LineHunk into its new lines.
+typedef enum {
+  kLineStepEdit,    ///< Edit the next old line into the next new line.
+  kLineStepInsert,  ///< Insert the next new line.
+  kLineStepDelete,  ///< Delete the next old line.
+} LineStep;
+
+/// A hunk of a line diff, with 0-based line indices.
+typedef struct {
+  linenr_T old_start;
+  linenr_T old_count;
+  linenr_T new_start;
+  linenr_T new_count;
+  size_t steps_start;  ///< The index of the first step of the hunk in LineDiff.steps.
+  size_t steps_count;
+} LineHunk;
+
+typedef kvec_t(uint8_t) LineStepVec;
+
+/// A line diff, as hunks of LineSteps.
+typedef struct {
+  kvec_t(LineHunk) hunks;
+  LineStepVec steps;
+} LineDiff;
+
+/// The lines of a buffer, each followed by a NL.
+typedef struct {
+  mmfile_t text;
+  int *line_starts;  ///< The offsets of the lines in "text", followed by the size of "text".
+} JoinedLines;
+
+/// The lines a LineDiff is computed from.
+typedef struct {
+  LineDiff *diff;
+  const JoinedLines *old_lines;
+  const JoinedLines *new_lines;
+} LineDiffContext;
 
 #include "fileio.c.generated.h"
 
@@ -3217,6 +3262,425 @@ int buf_check_timestamp(buf_T *buf)
   return retval;
 }
 
+/// Join the lines of "buf" into "lines", each followed by a NL, with the NULs
+/// stored as NL turned back into NUL.
+///
+/// @return  FAIL if the text is too big for xdiff, OK otherwise
+static int buf_join_lines(buf_T *buf, JoinedLines *lines)
+{
+  size_t len = 0;
+  for (linenr_T lnum = 1; lnum <= buf->b_ml.ml_line_count; lnum++) {
+    len += (size_t)ml_get_buf_len(buf, lnum) + 1;
+  }
+  if (len > INT_MAX) {
+    return FAIL;
+  }
+
+  char *ptr = xmalloc(len);
+  int *line_starts = xmalloc(((size_t)buf->b_ml.ml_line_count + 1) * sizeof(int));
+  size_t off = 0;
+  for (linenr_T lnum = 1; lnum <= buf->b_ml.ml_line_count; lnum++) {
+    char *line = ml_get_buf(buf, lnum);
+    size_t line_len = (size_t)ml_get_buf_len(buf, lnum);
+    line_starts[lnum - 1] = (int)off;
+    memcpy(ptr + off, line, line_len);
+    memchrsub(ptr + off, NL, NUL, line_len);
+    off += line_len;
+    ptr[off++] = NL;
+  }
+  line_starts[buf->b_ml.ml_line_count] = (int)off;
+
+  lines->text = (mmfile_t){ .ptr = ptr, .size = (int)len };
+  lines->line_starts = line_starts;
+  return OK;
+}
+
+/// Return the line at 0-based index "idx" of "lines", and set "len" to its
+/// length.
+static const char *joined_line(const JoinedLines *lines, linenr_T idx, colnr_T *len)
+{
+  *len = lines->line_starts[idx + 1] - lines->line_starts[idx] - 1;
+  return lines->text.ptr + lines->line_starts[idx];
+}
+
+/// Compute the lengths of the common prefix and suffix of "a" and "b", up to
+/// "max" bytes each. The prefix and the suffix don't overlap and don't split
+/// multibyte characters.
+static void common_line_ends(const char *a, colnr_T a_len, const char *b, colnr_T b_len,
+                             colnr_T max, colnr_T *prefix, colnr_T *suffix)
+{
+  colnr_T p = 0;
+  colnr_T p_max = MIN(MIN(a_len, b_len), max);
+  while (p < p_max && a[p] == b[p]) {
+    p++;
+  }
+  while (p > 0 && (utf_is_trail_byte((uint8_t)a[p]) || utf_is_trail_byte((uint8_t)b[p]))) {
+    p--;
+  }
+
+  colnr_T s = 0;
+  colnr_T s_max = MIN(MIN(a_len, b_len) - p, max);
+  while (s < s_max && a[a_len - s - 1] == b[b_len - s - 1]) {
+    s++;
+  }
+  while (s > 0 && utf_is_trail_byte((uint8_t)a[a_len - s])) {
+    s--;
+  }
+
+  *prefix = p;
+  *suffix = s;
+}
+
+/// The maximum length of the common prefix and suffix that line_edit_score()
+/// compares.
+#define LINE_SCORE_MAX_LEN 100
+
+/// Return one more than the number of bytes of line "a" that stay in place when
+/// it's edited into line "b", or 0 if those bytes are less than half of "a"
+/// and less than LINE_SCORE_MAX_LEN.
+static int line_edit_score(const char *a, colnr_T a_len, const char *b, colnr_T b_len)
+{
+  colnr_T prefix;
+  colnr_T suffix;
+  common_line_ends(a, a_len, b, b_len, LINE_SCORE_MAX_LEN, &prefix, &suffix);
+  colnr_T kept = prefix + suffix;
+  if (2 * kept < MIN(a_len, 2 * LINE_SCORE_MAX_LEN)) {
+    return 0;
+  }
+  return kept + 1;
+}
+
+/// The maximum number of cells of the table that align_hunk_lines() fills.
+#define LINE_ALIGN_MAX_CELLS (1 << 20)
+
+/// Push the steps that turn the old lines of "hunk" into its new lines to
+/// "steps". The steps edit the old lines into the new lines they pair up with,
+/// for the highest total line_edit_score(), and insert or delete the others.
+/// The insertions between two edits come before the deletions.
+static void align_hunk_lines(const JoinedLines *old_lines, const JoinedLines *new_lines,
+                             LineHunk *hunk, LineStepVec *steps)
+{
+  size_t n = (size_t)hunk->old_count;
+  size_t m = (size_t)hunk->new_count;
+  size_t width = m + 1;
+  hunk->steps_start = kv_size(*steps);
+
+  // The step into each cell of the table, for the best alignment of the first
+  // "i" old lines and the first "j" new lines.
+  uint8_t *table = NULL;
+  if (n > 0 && m > 0 && (n + 1) * width <= LINE_ALIGN_MAX_CELLS) {
+    table = xmalloc((n + 1) * width);
+    int64_t *prev = xcalloc(width, sizeof(int64_t));
+    int64_t *cur = xcalloc(width, sizeof(int64_t));
+    for (size_t i = 1; i <= n; i++) {
+      colnr_T a_len;
+      const char *a = joined_line(old_lines, hunk->old_start + (linenr_T)i - 1, &a_len);
+      cur[0] = 0;
+      for (size_t j = 1; j <= m; j++) {
+        int64_t best = prev[j];
+        uint8_t step = kLineStepDelete;
+        if (cur[j - 1] > best) {
+          best = cur[j - 1];
+          step = kLineStepInsert;
+        }
+        colnr_T b_len;
+        const char *b = joined_line(new_lines, hunk->new_start + (linenr_T)j - 1, &b_len);
+        int score = line_edit_score(a, a_len, b, b_len);
+        if (score > 0 && prev[j - 1] + score >= best) {
+          best = prev[j - 1] + score;
+          step = kLineStepEdit;
+        }
+        cur[j] = best;
+        table[i * width + j] = step;
+      }
+      int64_t *tmp = prev;
+      prev = cur;
+      cur = tmp;
+    }
+    xfree(prev);
+    xfree(cur);
+  }
+
+  // Trace the alignment back from the last lines, then push its steps from the
+  // first lines.
+  uint8_t *path = xmalloc(n + m);
+  size_t path_len = 0;
+  for (size_t i = n, j = m; i > 0 || j > 0;) {
+    uint8_t step = table == NULL || i == 0
+                   ? (j > 0 ? kLineStepInsert : kLineStepDelete)
+                   : (j == 0 ? kLineStepDelete : table[i * width + j]);
+    path[path_len++] = step;
+    if (step != kLineStepInsert) {
+      i--;
+    }
+    if (step != kLineStepDelete) {
+      j--;
+    }
+  }
+  xfree(table);
+
+  size_t inserts = 0;
+  size_t deletes = 0;
+  for (size_t k = path_len + 1; k-- > 0;) {
+    uint8_t step = k > 0 ? path[k - 1] : kLineStepEdit;
+    if (step == kLineStepInsert) {
+      inserts++;
+    } else if (step == kLineStepDelete) {
+      deletes++;
+    } else {
+      for (; inserts > 0; inserts--) {
+        kv_push(*steps, kLineStepInsert);
+      }
+      for (; deletes > 0; deletes--) {
+        kv_push(*steps, kLineStepDelete);
+      }
+      if (k > 0) {
+        kv_push(*steps, kLineStepEdit);
+      }
+    }
+  }
+  xfree(path);
+
+  hunk->steps_count = kv_size(*steps) - hunk->steps_start;
+}
+
+static int push_line_hunk(int start_a, int count_a, int start_b, int count_b, void *cb_data)
+{
+  LineDiffContext *ctx = cb_data;
+  LineHunk hunk = {
+    .old_start = start_a,
+    .old_count = count_a,
+    .new_start = start_b,
+    .new_count = count_b,
+  };
+  align_hunk_lines(ctx->old_lines, ctx->new_lines, &hunk, &ctx->diff->steps);
+  kv_push(ctx->diff->hunks, hunk);
+  return 0;
+}
+
+/// Compute the line diff from "buf" to "newbuf".
+static LineDiff buf_line_diff(buf_T *buf, buf_T *newbuf)
+{
+  LineDiff diff = { 0 };
+  JoinedLines old_lines = { 0 };
+  JoinedLines new_lines = { 0 };
+  LineDiffContext ctx = { .diff = &diff, .old_lines = &old_lines, .new_lines = &new_lines };
+  xpparam_t params = { .flags = XDF_INDENT_HEURISTIC };
+  xdemitconf_t cfg = { .hunk_func = push_line_hunk };
+  xdemitcb_t ecb = { .priv = &ctx };
+
+  if (buf_join_lines(buf, &old_lines) == FAIL
+      || buf_join_lines(newbuf, &new_lines) == FAIL
+      || xdl_diff(&old_lines.text, &new_lines.text, &params, &cfg, &ecb) == -1) {
+    // Without a diff, a single hunk replaces all the lines.
+    LineHunk hunk = {
+      .old_count = buf->b_ml.ml_line_count,
+      .new_count = newbuf->b_ml.ml_line_count,
+      .steps_count = (size_t)buf->b_ml.ml_line_count + (size_t)newbuf->b_ml.ml_line_count,
+    };
+    kv_size(diff.hunks) = 0;
+    kv_size(diff.steps) = 0;
+    kv_push(diff.hunks, hunk);
+    for (linenr_T i = 0; i < hunk.new_count; i++) {
+      kv_push(diff.steps, kLineStepInsert);
+    }
+    for (linenr_T i = 0; i < hunk.old_count; i++) {
+      kv_push(diff.steps, kLineStepDelete);
+    }
+  }
+
+  xfree(old_lines.text.ptr);
+  xfree(old_lines.line_starts);
+  xfree(new_lines.text.ptr);
+  xfree(new_lines.line_starts);
+  return diff;
+}
+
+/// Replace line "lnum" of "buf" with "line", as an edit of the bytes between
+/// their common prefix and suffix.
+static void buf_replace_line_bytes(buf_T *buf, linenr_T lnum, char *line, ExtmarkOp undo)
+{
+  char *old_line = ml_get_buf(buf, lnum);
+  colnr_T old_len = ml_get_buf_len(buf, lnum);
+  colnr_T new_len = (colnr_T)strlen(line);
+  if (old_len == new_len && memcmp(old_line, line, (size_t)old_len) == 0) {
+    return;
+  }
+
+  colnr_T prefix;
+  colnr_T suffix;
+  common_line_ends(old_line, old_len, line, new_len, MAXCOL, &prefix, &suffix);
+
+  ml_replace_buf(buf, lnum, line, true, false);
+  extmark_splice_cols(buf, (int)lnum - 1, prefix, old_len - prefix - suffix,
+                      new_len - prefix - suffix, undo);
+}
+
+/// Insert "count" lines of "newbuf" from line "new_lnum" into "buf" above line
+/// "lnum", and move the marks and extmarks below them.
+static void buf_insert_lines(buf_T *buf, linenr_T lnum, buf_T *newbuf, linenr_T new_lnum,
+                             linenr_T count, ExtmarkOp undo)
+{
+  bcount_t inserted_bytes = 0;
+  for (linenr_T i = 0; i < count; i++) {
+    char *line = ml_get_buf(newbuf, new_lnum + i);
+    inserted_bytes += ml_get_buf_len(newbuf, new_lnum + i) + 1;
+    ml_append_buf(buf, lnum + i - 1, line, 0, false);
+  }
+  mark_adjust_buf(buf, lnum, MAXLNUM, count, 0, true, kMarkAdjustNormal, kExtmarkNOOP);
+  extmark_splice(buf, (int)lnum - 1, 0, 0, 0, 0, (int)count, 0, inserted_bytes, undo);
+
+  // mark_adjust_buf() moves the cursor and topline of the other windows.
+  if (curwin->w_buffer == buf) {
+    linenr_T *const lnums[] = { &curwin->w_cursor.lnum, &curwin->w_topline };
+    for (size_t i = 0; i < ARRAY_SIZE(lnums); i++) {
+      if (*lnums[i] >= lnum) {
+        *lnums[i] += count;
+      }
+    }
+  }
+}
+
+/// Delete "count" lines of "buf" from line "lnum", and move the marks and
+/// extmarks in and below them.
+static void buf_delete_lines(buf_T *buf, linenr_T lnum, linenr_T count, ExtmarkOp undo)
+{
+  bcount_t deleted_bytes = get_region_bytecount(buf, lnum, lnum + count, 0, 0);
+  for (linenr_T i = 0; i < count; i++) {
+    ml_delete_buf(buf, lnum, false);
+  }
+  mark_adjust_buf(buf, lnum, lnum + count - 1, MAXLNUM, -count, true, kMarkAdjustNormal,
+                  kExtmarkNOOP);
+  extmark_splice(buf, (int)lnum - 1, 0, (int)count, 0, deleted_bytes, 0, 0, 0, undo);
+
+  // mark_adjust_buf() moves the cursor and topline of the other windows.
+  if (curwin->w_buffer == buf) {
+    linenr_T *const lnums[] = { &curwin->w_cursor.lnum, &curwin->w_topline };
+    for (size_t i = 0; i < ARRAY_SIZE(lnums); i++) {
+      if (*lnums[i] >= lnum + count) {
+        *lnums[i] -= count;
+      } else if (*lnums[i] >= lnum) {
+        *lnums[i] = lnum;
+      }
+    }
+  }
+}
+
+/// Apply the steps of "hunk" in "diff" to "buf", taking the new lines from
+/// "newbuf".
+static void buf_apply_line_hunk(buf_T *buf, buf_T *newbuf, const LineDiff *diff, LineHunk hunk,
+                                bool save_undo)
+{
+  ExtmarkOp undo = save_undo ? kExtmarkUndo : kExtmarkNoUndo;
+  linenr_T lnum = hunk.old_start + 1;
+  linenr_T new_lnum = hunk.new_start + 1;
+
+  if (save_undo) {
+    // Saving for a reload also works when 'modifiable' is off.
+    u_savecommon(buf, lnum - 1, lnum + hunk.old_count, 0, true);
+  }
+
+  const uint8_t *steps = diff->steps.items + hunk.steps_start;
+  for (size_t i = 0; i < hunk.steps_count;) {
+    uint8_t step = steps[i];
+    size_t run = 1;
+    while (i + run < hunk.steps_count && steps[i + run] == step) {
+      run++;
+    }
+    linenr_T count = (linenr_T)run;
+
+    switch (step) {
+    case kLineStepEdit:
+      for (linenr_T k = 0; k < count; k++) {
+        buf_replace_line_bytes(buf, lnum + k, ml_get_buf(newbuf, new_lnum + k), undo);
+      }
+      lnum += count;
+      new_lnum += count;
+      break;
+    case kLineStepInsert:
+      buf_insert_lines(buf, lnum, newbuf, new_lnum, count, undo);
+      lnum += count;
+      new_lnum += count;
+      break;
+    case kLineStepDelete:
+      buf_delete_lines(buf, lnum, count, undo);
+      break;
+    }
+    i += run;
+  }
+
+  changed_lines(buf, hunk.old_start + 1, 0, hunk.old_start + 1 + hunk.old_count,
+                hunk.new_count - hunk.old_count, true);
+}
+
+/// Replace the text of "buf" with the text of "newbuf", read from the file of
+/// "buf", as the edits of their line diff, and take the state of the file that
+/// "newbuf" got from reading it.
+static void buf_reload_from_dummy(buf_T *buf, buf_T *newbuf)
+{
+  bool save_undo = p_ur < 0 || buf->b_ml.ml_line_count <= p_ur;
+  if (save_undo) {
+    // Sync first so that this is a separate undo-able action.
+    u_sync(false);
+  }
+
+  LineDiff diff = buf_line_diff(buf, newbuf);
+
+  // A reload doesn't modify the buffer. Marking it as modified while applying
+  // the edits keeps changed() from warning about a readonly file and from
+  // creating a swap file.
+  bool was_changed = buf->b_changed;
+  buf->b_changed = true;
+  // A reload doesn't set the '. mark or add to the changelist.
+  int save_cmod_flags = cmdmod.cmod_flags;
+  cmdmod.cmod_flags |= CMOD_KEEPJUMPS;
+
+  // Applying the hunks from the last to the first keeps the line numbers of
+  // the remaining ones valid.
+  for (size_t i = kv_size(diff.hunks); i > 0; i--) {
+    buf_apply_line_hunk(buf, newbuf, &diff, kv_A(diff.hunks, i - 1), save_undo);
+  }
+
+  cmdmod.cmod_flags = save_cmod_flags;
+  buf->b_changed = was_changed;
+
+  // The undo entries of the hunks restore the text with the usual buffer
+  // updates, so undoing the reload doesn't need UH_RELOAD.
+  if (save_undo && kv_size(diff.hunks) > 0 && buf->b_u_newhead != NULL) {
+    buf->b_u_newhead->uh_flags &= ~UH_RELOAD;
+  }
+  kv_destroy(diff.hunks);
+  kv_destroy(diff.steps);
+
+  // An empty file leaves a single empty line, which memline marks as empty
+  // only once it's deleted.
+  if ((newbuf->b_ml.ml_flags & ML_EMPTY) && !(buf->b_ml.ml_flags & ML_EMPTY)) {
+    ml_delete_buf(buf, 1, false);
+  }
+
+  buf->b_p_ro = newbuf->b_p_ro || buf->b_help || (readonlymode && buf->b_p_ro);
+  buf->b_p_eof = newbuf->b_p_eof;
+  buf->b_p_eol = newbuf->b_p_eol;
+  buf->b_p_bomb = newbuf->b_p_bomb;
+  buf->b_no_eol_lnum = newbuf->b_no_eol_lnum;
+  buf->b_flags = (buf->b_flags & ~(BF_NEW | BF_NEW_W)) | (newbuf->b_flags & (BF_NEW | BF_NEW_W));
+  buf->b_mtime = newbuf->b_mtime;
+  buf->b_mtime_ns = newbuf->b_mtime_ns;
+  buf->b_mtime_read = newbuf->b_mtime_read;
+  buf->b_mtime_read_ns = newbuf->b_mtime_read_ns;
+  buf->b_orig_size = newbuf->b_orig_size;
+  buf->b_orig_mode = newbuf->b_orig_mode;
+  save_file_ff(buf);
+
+  unchanged(buf, false, true);
+  if (save_undo) {
+    // Mark all undo states as changed.
+    u_unchanged(buf);
+  } else {
+    u_clearallandblockfree(buf);
+  }
+}
+
 /// Reload a buffer that is already loaded.
 /// Used when the file was changed outside of Vim.
 /// "orig_mode" is buf->b_orig_mode before the need for reloading was detected.
@@ -3231,8 +3695,41 @@ void buf_reload(buf_T *buf, int orig_mode, bool reload_options)
   CtxSwitch aco = { 0 };
   int flags = READ_NEW;
 
+  // The text of the file is applied as the edits of a line diff. Those move
+  // extmarks and marks with the text around them and are sent to
+  // buffer-update subscribers. No BufReadPre or BufReadPost autocommands are
+  // triggered. The whole text is replaced as when editing the file instead:
+  // - When the options are detected again.
+  // - When a BufReadCmd autocommand matches the file. That autocommand reads
+  //   the file itself, into the buffer.
+  // - When a BufReadPre autocommand matches the file. That autocommand can
+  //   start a conversion that a BufReadPost autocommand finishes, like
+  //   decompressing the file (see gzip-example). The bytes of the file are
+  //   then not the text of the buffer.
+  bool apply_diff = !reload_options
+                    && !has_autocmd(EVENT_BUFREADCMD, buf->b_fname, buf)
+                    && !has_autocmd(EVENT_BUFREADPRE, buf->b_fname, buf);
+  buf_T *newbuf = apply_diff ? buf_read_into_dummy(buf) : NULL;
+
   // Set curwin/curbuf for "buf" and save some things.
   ctx_switch(&aco, NULL, NULL, buf, 0);
+
+  if (apply_diff) {
+    if (newbuf == NULL) {
+      if (!aborting()) {
+        semsg(_("E321: Could not reload \"%s\""), buf->b_fname);
+      }
+    } else {
+      set_bufref(&bufref, newbuf);
+      buf_reload_from_dummy(buf, newbuf);
+      if (bufref_valid(&bufref)) {
+        wipe_buffer(newbuf, false);
+      }
+    }
+    check_cursor(curwin);
+    update_topline(curwin);
+    goto theend;
+  }
 
   mc_buf_clear(buf);  // Multicursor: file-reload invalidates the extmarks.
 
@@ -3339,6 +3836,7 @@ void buf_reload(buf_T *buf, int orig_mode, bool reload_options)
     }
   }
 
+theend:
   // If the mode didn't change and 'readonly' was set, keep the old
   // value; the user probably used the ":view" command.  But don't
   // reset it, might have had a read error.

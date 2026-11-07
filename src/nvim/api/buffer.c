@@ -126,9 +126,9 @@ Integer nvim_buf_line_count(Buffer buf, Error *err)
 ///        Else the first notification will be `nvim_buf_changedtick_event`.
 ///        Not for Lua callbacks.
 /// @param  opts  Optional parameters.
-///             - on_bytes: Called on granular changes (compared to on_lines). Not called on buffer
-///               reload (`:checktime`, `:edit`, …), see `on_reload`. Returning [lua-truthy] deletes
-///               the callback. Args:
+///             - on_bytes: Called on granular changes (compared to on_lines). Not called when the
+///               whole buffer is reloaded (`:edit`, …), see `on_reload`. Returning [lua-truthy]
+///               deletes the callback. Args:
 ///               - the string "bytes"
 ///               - buffer id
 ///               - b:changedtick
@@ -152,8 +152,9 @@ Integer nvim_buf_line_count(Buffer buf, Error *err)
 ///               when a callback returns [lua-truthy] to delete itself. Args:
 ///               - the string "detach"
 ///               - buffer id
-///             - on_lines: Called on linewise changes. Not called on buffer reload (`:checktime`,
-///               `:edit`, …), see `on_reload`. Returning [lua-truthy] deletes the callback. Args:
+///             - on_lines: Called on linewise changes. Not called when the whole buffer is
+///               reloaded (`:edit`, …), see `on_reload`. Returning [lua-truthy] deletes the
+///               callback. Args:
 ///               - the string "lines"
 ///               - buffer id
 ///               - b:changedtick
@@ -163,8 +164,10 @@ Integer nvim_buf_line_count(Buffer buf, Error *err)
 ///               - byte count of previous contents
 ///               - deleted_codepoints (if `utf_sizes` is true)
 ///               - deleted_codeunits (if `utf_sizes` is true)
-///             - on_reload: Called on whole-buffer load (`:checktime`, `:edit`, …). Clients should
-///               typically re-fetch the entire buffer contents. Args:
+///             - on_reload: Called when the whole buffer is reloaded (`:edit`, …). A buffer
+///               whose file changed is reloaded with linewise changes instead, see
+///               [timestamp-reload]. Clients should typically re-fetch the entire buffer contents.
+///               Args:
 ///               - the string "reload"
 ///               - buffer id
 ///             - preview: also attach to command preview (i.e. 'inccommand')

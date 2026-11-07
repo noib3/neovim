@@ -294,6 +294,9 @@ func Test_file_changed_wipeout()
   edit Xchanged_bw
   augroup FileChangedWipeout
     autocmd FileChangedShell * ++once let v:fcs_choice = 'reload'
+    " Nvim: only a reload of a file matched by a BufReadPre autocommand
+    " triggers BufReadPost.
+    autocmd BufReadPre * :
     autocmd BufReadPost * ++once %bw!
   augroup END
 
