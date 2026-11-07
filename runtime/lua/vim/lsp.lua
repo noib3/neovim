@@ -918,7 +918,6 @@ local function buf_attach(bufnr)
   end
   attached_buffers[bufnr] = true
 
-  local uri = vim.uri.from_buf(bufnr)
   local augroup = ('nvim.lsp.b_%d_save'):format(bufnr)
   local group = api.nvim_create_augroup(augroup, { clear = true })
   nvim_on('BufWritePre', group, {
@@ -928,7 +927,7 @@ local function buf_attach(bufnr)
     for _, client in ipairs(lsp.get_clients({ bufnr = ctx.buf })) do
       local params = {
         textDocument = {
-          uri = uri,
+          uri = vim.uri.from_buf(ctx.buf),
         },
         reason = protocol.TextDocumentSaveReason.Manual, ---@type integer
       }
@@ -952,6 +951,12 @@ local function buf_attach(bufnr)
   }, function(ctx)
     text_document_did_save_handler(ctx.buf)
   end)
+  nvim_on('BufFilePost', group, {
+    buf = bufnr,
+    desc = 'vim.lsp: textDocument/didClose and textDocument/didOpen on rename',
+  }, function(ctx)
+    changetracking._send_did_rename(ctx.buf)
+  end)
   -- First time, so attach and set up stuff.
   api.nvim_buf_attach(bufnr, false, {
     on_lines = function(_, _, changedtick, firstline, lastline, new_lastline)
@@ -965,7 +970,7 @@ local function buf_attach(bufnr)
 
     on_reload = function()
       local clients = lsp.get_clients({ bufnr = bufnr })
-      local params = { textDocument = { uri = uri } }
+      local params = { textDocument = { uri = vim.uri.from_buf(bufnr) } }
       for _, client in ipairs(clients) do
         changetracking.reset_buf(client, bufnr)
         if client:supports_method('textDocument/didClose') then
