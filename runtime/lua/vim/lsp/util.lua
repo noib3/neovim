@@ -541,15 +541,14 @@ function M.rename(old_fname, new_fname, opts)
   end
 
   for b, rename in pairs(buf_rename) do
-    -- Rename with :saveas. This does two things:
-    -- * Unset BF_WRITE_MASK, so that users don't get E13 when they do :write.
-    -- * Send didClose and didOpen via textDocument/didSave handler.
     vim._with({ buf = b }, function()
-      vim.cmd('keepalt saveas! ' .. vim.fn.fnameescape(rename.to))
+      vim.cmd.file({ rename.to, magic = { file = false }, mods = { keepalt = true } })
     end)
-    -- Delete the new buffer with the old name created by :saveas. nvim_buf_delete and
-    -- :bwipeout are futile because the buffer will be added again somewhere else.
-    vim.cmd('bdelete! ' .. vim.fn.bufnr(rename.from))
+    -- Wipe out the buffer with the old name created by :file.
+    local old_buf = vim.fn.bufnr(rename.from)
+    if old_buf ~= -1 then
+      api.nvim_buf_delete(old_buf, { force = true })
+    end
   end
 end
 
