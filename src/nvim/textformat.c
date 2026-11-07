@@ -32,6 +32,7 @@
 #include "nvim/option_defs.h"
 #include "nvim/option_vars.h"
 #include "nvim/os/input.h"
+#include "nvim/plines.h"
 #include "nvim/pos_defs.h"
 #include "nvim/search.h"
 #include "nvim/state_defs.h"
@@ -60,6 +61,50 @@ bool has_format_option(int x)
     return false;
   }
   return vim_strchr(curbuf->b_p_fo, x) != NULL;
+}
+
+/// The virtual column where byte "col" of "line" starts, like get_nolist_virtcol() but without
+/// inline virtual text.
+static colnr_T fmt_virtcol(char *line, colnr_T col)
+{
+  CharsizeArg csarg;
+  CSType cstype = init_charsize_arg(&csarg, curwin, 0, line);
+  if (curwin->w_p_list && vim_strchr(p_cpo, kCpoListwm) == NULL) {
+    csarg.use_tabstop = true;
+  }
+  csarg.max_head_vcol = -1;
+  StrCharInfo ci = utf_ptr2StrCharInfo(line);
+  colnr_T vcol = 0;
+  while (true) {
+    ClusterInfo cli = utf_ClusterInfo(ci);
+    CharSize cs = win_charsize(cstype, vcol, ci.ptr, ci.chr.value, &csarg, cli.cells);
+    if (*ci.ptr == NUL || cli.next.ptr - line > col) {
+      return vcol + cs.head;
+    }
+    vcol += cs.width;
+    ci = cli.next;
+  }
+}
+
+/// The byte column of the character of "line" at virtual column "wcol", like coladvance() in
+/// Insert mode but without inline virtual text.
+static colnr_T fmt_vcol2col(char *line, colnr_T wcol)
+{
+  CharsizeArg csarg;
+  CSType cstype = init_charsize_arg(&csarg, curwin, 0, line);
+  StrCharInfo ci = utf_ptr2StrCharInfo(line);
+  colnr_T vcol = 0;
+  while (vcol <= wcol && *ci.ptr != NUL) {
+    ClusterInfo cli = utf_ClusterInfo(ci);
+    vcol += win_charsize(cstype, vcol, ci.ptr, ci.chr.value, &csarg, cli.cells).width;
+    ci = cli.next;
+  }
+  colnr_T col = (colnr_T)(ci.ptr - line);
+  if (vcol > wcol) {
+    col--;
+    col -= utf_head_off(line, line + col);
+  }
+  return MAX(col, 0);
 }
 
 /// Format text at the current insert position.
@@ -107,7 +152,8 @@ void internal_format(int textwidth, int second_indent, int flags, bool format_on
     colnr_T col;
     bool did_do_comment = false;
 
-    colnr_T virtcol = get_nolist_virtcol() + char2cells(c != NUL ? c : gchar_cursor());
+    colnr_T virtcol = fmt_virtcol(get_cursor_line_ptr(), curwin->w_cursor.col)
+                      + char2cells(c != NUL ? c : gchar_cursor());
     if (virtcol <= (colnr_T)textwidth) {
       break;
     }
@@ -154,10 +200,7 @@ void internal_format(int textwidth, int second_indent, int flags, bool format_on
     }
 
     // find column of textwidth border
-    coladvance(curwin, (colnr_T)textwidth);
-    wantcol = curwin->w_cursor.col;
-
-    curwin->w_cursor.col = startcol;
+    wantcol = fmt_vcol2col(get_cursor_line_ptr(), (colnr_T)textwidth);
     foundcol = 0;
     int skip_pos = 0;
 
