@@ -453,6 +453,7 @@ int indent_size_ts(char const *ptr, OptInt ts, colnr_T *vts)
 ///  SIN_INSERT: insert the indent in front of the line.
 ///  SIN_UNDO:   save line for undo before changing it.
 ///  SIN_NOMARK: don't move extmarks (because just after ml_append or something)
+///  SIN_CHECK:  don't change the line, only return whether it would change.
 ///  @param size measured in spaces
 ///
 /// @return  true if the line was changed.
@@ -564,6 +565,9 @@ bool set_indent(int size, int flags)
   // Return if the indent is OK already.
   if (!doit && !ascii_iswhite(*p) && !(flags & SIN_INSERT)) {
     return false;
+  }
+  if (flags & SIN_CHECK) {
+    return true;
   }
 
   // Allocate memory for the new line.

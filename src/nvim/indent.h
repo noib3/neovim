@@ -13,6 +13,7 @@ enum {
   SIN_INSERT  = 2,  ///< insert indent before existing text
   SIN_UNDO    = 4,  ///< save line for undo before changing it
   SIN_NOMARK  = 8,  ///< don't adjust extmarks
+  SIN_CHECK   = 16, ///< don't change the line, only check whether it would change
 };
 
 typedef int (*Indenter)(void);

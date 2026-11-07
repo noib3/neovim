@@ -1923,6 +1923,24 @@ static int join_space_count(int end1, int end2, const char *next, bool after_tex
   return count;
 }
 
+/// The number of spaces that joining "line", of length "len", with the next line inserts between
+/// them, where "next" is the text of the next line after its leading white space.
+int join_spaces(const char *line, size_t len, const char *next)
+{
+  int end1 = NUL;
+  int end2 = NUL;
+  if (len > 0) {
+    const char *end = line + len;
+    MB_PTR_BACK(line, end);
+    end1 = utf_ptr2char(end);
+    if (end > line) {
+      MB_PTR_BACK(line, end);
+      end2 = utf_ptr2char(end);
+    }
+  }
+  return join_space_count(end1, end2, next, len > 0);
+}
+
 /// @param count              number of lines (minimal 2) to join at the cursor position.
 /// @param save_undo          when true, save lines for undo first.
 /// @param use_formatoptions  set to false when e.g. processing backspace and comment
