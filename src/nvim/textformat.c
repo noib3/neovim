@@ -601,10 +601,11 @@ static bool ends_in_white(linenr_T lnum)
 /// @return  true if the two comment leaders given are the same.
 ///
 /// @param lnum  The first line.  White-space is ignored.
+/// @param lnum2  The second line.
 ///
 /// @note the whole of 'leader1' must match 'leader2_len' characters from 'leader2'.
-static bool same_leader(linenr_T lnum, int leader1_len, char *leader1_flags, int leader2_len,
-                        char *leader2_flags)
+static bool same_leader(linenr_T lnum, int leader1_len, char *leader1_flags, linenr_T lnum2,
+                        int leader2_len, char *leader2_flags)
 {
   int idx1 = 0;
   int idx2 = 0;
@@ -648,7 +649,7 @@ static bool same_leader(linenr_T lnum, int leader1_len, char *leader1_flags, int
   // The first line has to be saved, only one line can be locked at a time.
   char *line1 = xstrnsave(ml_get(lnum), (size_t)ml_get_len(lnum));
   for (idx1 = 0; ascii_iswhite(line1[idx1]); idx1++) {}
-  char *line2 = ml_get(lnum + 1);
+  char *line2 = ml_get(lnum2);
   for (idx2 = 0; idx2 < leader2_len; idx2++) {
     if (!ascii_iswhite(line2[idx2])) {
       if (line1[idx1++] != line2[idx2]) {
@@ -698,7 +699,7 @@ static bool paragraph_start(linenr_T lnum)
   if (has_format_option(kFoQNumber) && (get_number_indent(lnum) > 0)) {
     return true;                // numbered item starts in "lnum".
   }
-  if (!same_leader(lnum - 1, leader_len, leader_flags,
+  if (!same_leader(lnum - 1, leader_len, leader_flags, lnum,
                    next_leader_len, next_leader_flags)) {
     return true;                // change of comment leader.
   }
@@ -1107,6 +1108,7 @@ void format_lines(linenr_T line_count, bool avoid_fex)
       if (curwin->w_cursor.lnum >= curbuf->b_ml.ml_line_count
           || !same_leader(curwin->w_cursor.lnum,
                           leader_len, leader_flags,
+                          curwin->w_cursor.lnum + 1,
                           next_leader_len,
                           next_leader_flags)) {
         // Special case: If the next line starts with a line comment
