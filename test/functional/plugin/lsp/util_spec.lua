@@ -163,11 +163,6 @@ describe('vim.lsp.util', function()
         vim.cmd.write()
         local undotree = vim.fn.undotree()
         vim.lsp.util.rename(old, new)
-        -- Renaming uses :saveas, which updates the "last write" information.
-        -- Other than that, the undotree should remain the same.
-        undotree.save_cur = undotree.save_cur + 1
-        undotree.save_last = undotree.save_last + 1
-        undotree.entries[1].save = undotree.entries[1].save + 1
         return vim.deep_equal(undotree, vim.fn.undotree())
       end)
       eq(false, vim.uv.fs_stat(old) ~= nil)
@@ -194,6 +189,30 @@ describe('vim.lsp.util', function()
       eq(false, vim.uv.fs_stat(old) ~= nil)
       eq(true, vim.uv.fs_stat(new) ~= nil)
       eq(true, undo_kept)
+    end)
+
+    it('keeps unsaved changes of a renamed buffer', function()
+      local old = tmpname()
+      write_file(old, 'saved\n')
+      local new = tmpname(false)
+
+      local result = exec_lua(function()
+        vim.cmd.edit(old)
+        vim.api.nvim_buf_set_lines(0, 0, -1, true, { 'unsaved' })
+        vim.lsp.util.rename(old, new)
+        return {
+          name = vim.fs.basename(vim.api.nvim_buf_get_name(0)),
+          modified = vim.bo.modified,
+          old_buf_exists = vim.fn.bufexists(old) == 1,
+        }
+      end)
+      eq({ name = vim.fs.basename(new), modified = true, old_buf_exists = false }, result)
+      eq('saved\n', read_file(new))
+
+      -- The buffer is not marked not-edited, so it can be written without !.
+      command('write')
+      eq('unsaved\n', read_file(new))
+      os.remove(new)
     end)
 
     it('does not rename file when it conflicts with a buffer without file', function()
