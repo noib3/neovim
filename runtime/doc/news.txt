@@ -675,6 +675,8 @@ These existing features changed their behavior.
   and |nvim_buf_attach()| callbacks get `on_lines` and `on_bytes` instead of
   `on_reload`. |BufReadPost| is not triggered, unless a |BufReadPre| or
   |BufReadCmd| autocommand matches the file.
+• A |terminal| window that leaves |Terminal-mode| follows output until its
+  cursor is moved or it's scrolled, even if its cursor isn't on the last line.
 
 ==============================================================================
 REMOVED FEATURES                                                 *news-removed*
