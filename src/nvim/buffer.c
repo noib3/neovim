@@ -4192,21 +4192,19 @@ void set_buflisted(int on)
   }
 }
 
-/// Read the file for "buf" again and check if the contents changed.
-/// Return true if it changed or this could not be checked.
+/// Read the file for "buf" into a new dummy buffer, with the 'fileencoding',
+/// 'fileformat' and 'binary' of "buf", without triggering autocommands.
 ///
-/// @param  buf  buffer to check
+/// @param  buf  buffer whose file to read
 ///
-/// @return  true if the buffer's contents have changed
-bool buf_contents_changed(buf_T *buf)
+/// @return  the dummy buffer, or NULL if the file could not be read
+buf_T *buf_read_into_dummy(buf_T *buf)
   FUNC_ATTR_NONNULL_ALL
 {
-  bool differ = true;
-
   // Allocate a buffer without putting it in the buffer list.
   buf_T *newbuf = buflist_new(NULL, NULL, 1, BLN_DUMMY);
   if (newbuf == NULL) {
-    return true;
+    return NULL;
   }
 
   // Force the 'fileencoding' and 'fileformat' to be equal.
@@ -4221,31 +4219,53 @@ bool buf_contents_changed(buf_T *buf)
   // side-effects like wiping buffers
   block_autocmds();
 
-  if (ml_open(curbuf) == OK
-      && readfile(buf->b_ffname, buf->b_fname,
-                  0, 0, (linenr_T)MAXLNUM,
-                  &ea, READ_NEW | READ_DUMMY, false) == OK) {
-    // compare the two files line by line
-    if (buf->b_ml.ml_line_count == curbuf->b_ml.ml_line_count) {
-      differ = false;
-      for (linenr_T lnum = 1; lnum <= curbuf->b_ml.ml_line_count; lnum++) {
-        if (strcmp(ml_get_buf(buf, lnum), ml_get(lnum)) != 0) {
-          differ = true;
-          break;
-        }
-      }
-    }
-  }
+  bool read = ml_open(curbuf) == OK
+              && readfile(buf->b_ffname, buf->b_fname,
+                          0, 0, (linenr_T)MAXLNUM,
+                          &ea, READ_NEW | READ_DUMMY, false) == OK;
   xfree(ea.cmd);
 
   // restore curwin/curbuf and a few other things
   ctx_restore(&aco);
 
-  if (curbuf != newbuf) {  // safety check
+  if (!read && curbuf != newbuf) {  // safety check
     wipe_buffer(newbuf, false);
   }
 
   unblock_autocmds();
+
+  return read ? newbuf : NULL;
+}
+
+/// Read the file for "buf" again and check if the contents changed.
+/// Return true if it changed or this could not be checked.
+///
+/// @param  buf  buffer to check
+///
+/// @return  true if the buffer's contents have changed
+bool buf_contents_changed(buf_T *buf)
+  FUNC_ATTR_NONNULL_ALL
+{
+  buf_T *newbuf = buf_read_into_dummy(buf);
+  if (newbuf == NULL) {
+    return true;
+  }
+
+  // compare the two files line by line
+  bool differ = true;
+  if (buf->b_ml.ml_line_count == newbuf->b_ml.ml_line_count) {
+    differ = false;
+    for (linenr_T lnum = 1; lnum <= newbuf->b_ml.ml_line_count; lnum++) {
+      if (strcmp(ml_get_buf(buf, lnum), ml_get_buf(newbuf, lnum)) != 0) {
+        differ = true;
+        break;
+      }
+    }
+  }
+
+  if (curbuf != newbuf) {  // safety check
+    wipe_buffer(newbuf, false);
+  }
 
   return differ;
 }

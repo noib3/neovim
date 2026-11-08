@@ -930,12 +930,14 @@ describe('lua: nvim_buf_attach on_bytes', function()
 
       command 'checktime'
       check_events {
-        { 'test1', 'reload', 1 },
+        { 'test1', 'bytes', 1, 4, 0, 0, 0, 0, 3, 3, 0, 3, 3 },
+        { 'test1', 'bytes', 1, 4, 1, 0, 11, 0, 3, 3, 0, 3, 3 },
+        { 'test1', 'bytes', 1, 4, 2, 0, 22, 0, 0, 0, 1, 0, 11 },
       }
 
       feed 'ggJ'
       check_events {
-        { 'test1', 'bytes', 1, 5, 0, 10, 10, 1, 0, 1, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 6, 0, 10, 10, 1, 0, 1, 0, 1, 1 },
       }
 
       eq({ 'new line 1 new line 2', 'new line 3' }, api.nvim_buf_get_lines(0, 0, -1, true))
@@ -943,22 +945,26 @@ describe('lua: nvim_buf_attach on_bytes', function()
       -- check we can undo and redo a reload event.
       feed 'u'
       check_events {
-        { 'test1', 'bytes', 1, 8, 0, 10, 10, 0, 1, 1, 1, 0, 1 },
+        { 'test1', 'bytes', 1, 9, 0, 10, 10, 0, 1, 1, 1, 0, 1 },
       }
 
       feed 'u'
       check_events {
-        { 'test1', 'reload', 1 },
+        { 'test1', 'bytes', 1, 11, 2, 0, 22, 1, 0, 11, 0, 0, 0 },
+        { 'test1', 'bytes', 1, 11, 1, 0, 11, 0, 3, 3, 0, 3, 3 },
+        { 'test1', 'bytes', 1, 11, 0, 0, 0, 0, 3, 3, 0, 3, 3 },
       }
 
       feed '<c-r>'
       check_events {
-        { 'test1', 'reload', 1 },
+        { 'test1', 'bytes', 1, 13, 0, 0, 0, 0, 3, 3, 0, 3, 3 },
+        { 'test1', 'bytes', 1, 13, 1, 0, 11, 0, 3, 3, 0, 3, 3 },
+        { 'test1', 'bytes', 1, 13, 2, 0, 22, 0, 0, 0, 1, 0, 11 },
       }
 
       feed '<c-r>'
       check_events {
-        { 'test1', 'bytes', 1, 14, 0, 10, 10, 1, 0, 1, 0, 1, 1 },
+        { 'test1', 'bytes', 1, 15, 0, 10, 10, 1, 0, 1, 0, 1, 1 },
       }
     end)
 

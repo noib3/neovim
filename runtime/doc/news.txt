@@ -670,6 +670,11 @@ These existing features changed their behavior.
 • |gq| only changes the lines whose wrapping changes. Formatting text that is
   already formatted doesn't modify the buffer, and extmarks stay on their
   text.
+• Reloading a buffer whose file changed outside of Nvim (|timestamp|) applies
+  the changes as edits of its lines. Extmarks and marks stay on their text,
+  and |nvim_buf_attach()| callbacks get `on_lines` and `on_bytes` instead of
+  `on_reload`. |BufReadPost| is not triggered, unless a |BufReadPre| or
+  |BufReadCmd| autocommand matches the file.
 
 ==============================================================================
 REMOVED FEATURES                                                 *news-removed*
