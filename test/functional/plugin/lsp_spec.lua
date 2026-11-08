@@ -922,6 +922,42 @@ describe('LSP', function()
       eq({ 'initialize', 'initialized', 'shutdown', 'exit' }, messages.server3)
     end)
 
+    it(':file sends didClose and didOpen, and later notifications use the new name', function()
+      local tmpfile_old = tmpname(false)
+      local tmpfile_new = tmpname(false)
+      exec_lua(create_server_definition)
+      local messages = exec_lua(function()
+        local server = _G._create_server({
+          capabilities = {
+            textDocumentSync = {
+              willSave = true,
+            },
+          },
+        })
+        vim.api.nvim_buf_set_name(0, tmpfile_old)
+        local client_id = assert(vim.lsp.start({ name = 'dummy', cmd = server.cmd }))
+
+        vim.cmd.file(tmpfile_new)
+        vim.api.nvim_exec_autocmds('BufWritePre', { buf = 0, modeline = false })
+
+        vim.lsp.get_client_by_id(client_id):stop()
+        return vim.tbl_map(function(m)
+          local uri = m.params and m.params.textDocument and m.params.textDocument.uri
+          return { m.method, uri and vim.fs.basename(vim.uri.to_fname(uri)) }
+        end, server.messages)
+      end)
+      local old, new = vim.fs.basename(tmpfile_old), vim.fs.basename(tmpfile_new)
+      eq({
+        { 'initialize' },
+        { 'initialized' },
+        { 'textDocument/didClose', old },
+        { 'textDocument/didOpen', new },
+        { 'textDocument/willSave', new },
+        { 'shutdown' },
+        { 'exit' },
+      }, messages)
+    end)
+
     it('BufWritePre does not send notifications if server lacks willSave capabilities', function()
       exec_lua(create_server_definition)
       local messages = exec_lua(function()

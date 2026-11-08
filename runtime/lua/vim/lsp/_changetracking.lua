@@ -164,12 +164,23 @@ function M.init(client, bufnr)
   end
 end
 
---- Sends didOpen/didClose/didSave to all client groups.
+---@param buf_state vim.lsp.CTBufferState
+local function reset_timer(buf_state)
+  local timer = buf_state.timer
+  if timer then
+    buf_state.timer = nil
+    if not timer:is_closing() then
+      timer:stop()
+      timer:close()
+    end
+  end
+end
+
+--- Returns the change-tracking groups of the clients attached to `bufnr`, along with those clients.
 ---
 --- @param bufnr integer
-function M._send_did_save(bufnr)
-  --- Groups of the clients attached to `bufnr`, along with those clients.
-  --- Only clients attached to the buffer must be notified.
+--- @return table<string,{group: vim.lsp.CTGroup, clients: vim.lsp.Client[]}>
+local function attached_groups(bufnr)
   local groups = {} ---@type table<string,{group: vim.lsp.CTGroup, clients: vim.lsp.Client[]}>
   for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
     local group = get_group(client)
@@ -181,20 +192,27 @@ function M._send_did_save(bufnr)
     end
     table.insert(entry.clients, client)
   end
+  return groups
+end
 
+--- Sends didClose for the previous name of `bufnr` and didOpen for its current name to the clients
+--- attached to it, if the buffer was renamed since they were last notified.
+---
+--- @param bufnr integer
+function M._send_did_rename(bufnr)
+  local name = api.nvim_buf_get_name(bufnr)
   local uri = vim.uri.from_buf(bufnr)
-  local text = vim.func._memoize('concat', vim.lsp._buf_get_full_text)
+  for _, entry in pairs(attached_groups(bufnr)) do
+    local buf_state = state_by_group[entry.group].buffers[bufnr]
+    if buf_state and buf_state.name ~= name then
+      local old_name = buf_state.name
+      buf_state.name = name
+      -- didOpen sends the full text, which already includes the pending changes.
+      reset_timer(buf_state)
+      buf_state.pending_changes = {}
+      buf_state.needs_flush = false
 
-  -- Send didOpen/didClose/didSave to all client groups.
-  for _, entry in pairs(groups) do
-    local name = api.nvim_buf_get_name(bufnr)
-    local state = state_by_group[entry.group]
-    local buf_state = state.buffers[bufnr] or {}
-    local old_name = buf_state.name
-    buf_state.name = name
-
-    for _, client in ipairs(entry.clients) do
-      if old_name and name ~= old_name then
+      for _, client in ipairs(entry.clients) do
         client:notify('textDocument/didClose', {
           textDocument = {
             uri = vim.uri.from_fname(old_name),
@@ -210,33 +228,35 @@ function M._send_did_save(bufnr)
         }, bufnr)
         util.buf_versions[bufnr] = 0
       end
-      local save_capability = vim.tbl_get(client.server_capabilities, 'textDocumentSync', 'save')
-      if save_capability then
-        local included_text --- @type string?
-        if type(save_capability) == 'table' and save_capability.includeText then
-          included_text = text(bufnr)
-        end
-        client:notify('textDocument/didSave', {
-          textDocument = {
-            uri = uri,
-          },
-          text = included_text,
-        }, bufnr)
-      else
-        M.flush(client, bufnr)
-      end
     end
   end
 end
 
----@param buf_state vim.lsp.CTBufferState
-local function reset_timer(buf_state)
-  local timer = buf_state.timer
-  if timer then
-    buf_state.timer = nil
-    if not timer:is_closing() then
-      timer:stop()
-      timer:close()
+--- Sends didSave to the clients attached to `bufnr`, after didClose and didOpen if the buffer was
+--- renamed.
+---
+--- @param bufnr integer
+function M._send_did_save(bufnr)
+  M._send_did_rename(bufnr)
+
+  local uri = vim.uri.from_buf(bufnr)
+  local text = vim.func._memoize('concat', vim.lsp._buf_get_full_text)
+
+  for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+    local save_capability = vim.tbl_get(client.server_capabilities, 'textDocumentSync', 'save')
+    if save_capability then
+      local included_text --- @type string?
+      if type(save_capability) == 'table' and save_capability.includeText then
+        included_text = text(bufnr)
+      end
+      client:notify('textDocument/didSave', {
+        textDocument = {
+          uri = uri,
+        },
+        text = included_text,
+      }, bufnr)
+    else
+      M.flush(client, bufnr)
     end
   end
 end
