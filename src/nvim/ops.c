@@ -1889,6 +1889,58 @@ char *skip_comment(char *line, bool process, bool include_space, bool *is_commen
   return line;
 }
 
+/// The number of spaces that joining lines inserts before "next", the text of a joined line after
+/// its leading white space.
+///
+/// @param end1  the last character joined so far, or NUL
+/// @param end2  the character before "end1", or NUL
+/// @param after_text  whether any text was joined so far
+static int join_space_count(int end1, int end2, const char *next, bool after_text)
+{
+  int next_char = utf_ptr2char(next);
+  if (*next == NUL
+      || *next == ')'
+      || !after_text
+      || end1 == TAB
+      || (has_format_option(kFoMbyteJoin) && (next_char >= 0x100 || end1 >= 0x100))
+      || (has_format_option(kFoMbyteJoin2)
+          && (next_char >= 0x100 || utf_eat_space(end1))
+          && (end1 >= 0x100 || utf_eat_space(next_char)))) {
+    return 0;
+  }
+
+  int count = 0;
+  // don't add a space if the line is ending in a space
+  if (end1 == ' ') {
+    end1 = end2;
+  } else {
+    count++;
+  }
+  // Extra space when 'joinspaces' set and line ends in '.', '?', or '!'.
+  if (p_js && (end1 == '.' || end1 == '?' || end1 == '!')) {
+    count++;
+  }
+  return count;
+}
+
+/// The number of spaces that joining "line", of length "len", with the next line inserts between
+/// them, where "next" is the text of the next line after its leading white space.
+int join_spaces(const char *line, size_t len, const char *next)
+{
+  int end1 = NUL;
+  int end2 = NUL;
+  if (len > 0) {
+    const char *end = line + len;
+    MB_PTR_BACK(line, end);
+    end1 = utf_ptr2char(end);
+    if (end > line) {
+      MB_PTR_BACK(line, end);
+      end2 = utf_ptr2char(end);
+    }
+  }
+  return join_space_count(end1, end2, next, len > 0);
+}
+
 /// @param count              number of lines (minimal 2) to join at the cursor position.
 /// @param save_undo          when true, save lines for undo first.
 /// @param use_formatoptions  set to false when e.g. processing backspace and comment
@@ -1949,27 +2001,7 @@ int do_join(size_t count, bool insert_space, bool save_undo, bool use_formatopti
 
     if (insert_space && t > 0) {
       curr = skipwhite(curr);
-      if (*curr != NUL
-          && *curr != ')'
-          && sumsize != 0
-          && endcurr1 != TAB
-          && (!has_format_option(kFoMbyteJoin)
-              || (utf_ptr2char(curr) < 0x100 && endcurr1 < 0x100))
-          && (!has_format_option(kFoMbyteJoin2)
-              || (utf_ptr2char(curr) < 0x100 && !utf_eat_space(endcurr1))
-              || (endcurr1 < 0x100
-                  && !utf_eat_space(utf_ptr2char(curr))))) {
-        // don't add a space if the line is ending in a space
-        if (endcurr1 == ' ') {
-          endcurr1 = endcurr2;
-        } else {
-          spaces[t]++;
-        }
-        // Extra space when 'joinspaces' set and line ends in '.', '?', or '!'.
-        if (p_js && (endcurr1 == '.' || endcurr1 == '?' || endcurr1 == '!')) {
-          spaces[t]++;
-        }
-      }
+      spaces[t] = (char)join_space_count(endcurr1, endcurr2, curr, sumsize != 0);
     }
 
     if (t > 0 && curbuf_splice_pending == 0) {
