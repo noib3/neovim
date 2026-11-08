@@ -486,7 +486,7 @@ describe(':terminal mouse', function()
           term line 2              │term line 2             |
           term line 3              │term line 3             |
           term line 4              │term line 4             |
-          ^term line 5              │term line 5             |
+          term line ^5              │term line 5             |
           ==========                ==========              |
           :vsp                                              |
         ]])

@@ -3223,7 +3223,7 @@ static void anchor_window_views(Terminal *term, buf_T *buf, TerminalViewAnchors 
   size_t dropped = count_dropped_rows(term);
   FOR_ALL_TAB_WINDOWS(tp, wp) {
     if (wp->w_buffer != buf || is_ctx_win(wp) || (wp == curwin && is_focused(term))
-        || wp->w_cursor.lnum == buf->b_ml.ml_line_count) {
+        || wp->w_term_follow || wp->w_cursor.lnum == buf->b_ml.ml_line_count) {
       continue;
     }
     colnr_T cursor_vcol = 0;
