@@ -149,6 +149,8 @@ Because the file name was set without really starting to edit that file, you
 are protected from overwriting that file.  This is done by setting the
 "notedited" flag.  You can see if this flag is set with the CTRL-G or ":file"
 command.  It will include "[Not edited]" when the "notedited" flag is set.
+The flag is not set when |:file_f| gives the buffer a new name for the file it
+was already editing, e.g. after the file was renamed.
 When writing the buffer to the current file name (with ":w!"), the "notedited"
 flag is reset.
 

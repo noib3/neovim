@@ -8,7 +8,12 @@ local nvim_on = require('vim._core.util').nvim_on
 local M = {}
 
 local debounce_ms = 100
---- @type table<integer, { path: string, cancel: fun() }> bufnr -> watched file
+--- @class (private) nvim.autoread.FileIdentity
+--- @field dev integer
+--- @field ino integer
+--- @field mtime uv.fs_stat.result.time
+
+--- @type table<integer, { path: string, cancel: fun(), identity: nvim.autoread.FileIdentity }> bufnr -> watched file
 local watchers = {}
 --- @type table<integer, uv.uv_timer_t> bufnr -> debounce timer
 local timers = {}
@@ -96,6 +101,70 @@ local function should_watch(bufnr)
   return true
 end
 
+--- Returns the identity of the file at `path`, if it exists.
+--- @param path string
+--- @return nvim.autoread.FileIdentity?
+local function file_identity(path)
+  local stat = uv.fs_stat(path)
+  return stat and { dev = stat.dev, ino = stat.ino, mtime = stat.mtime }
+end
+
+--- Returns the path of the file with the given identity in `dir`, if any.
+---
+--- A rename keeps a file's mtime, while a new file reusing a freed inode gets a fresh one. Comparing
+--- mtimes thus tells the two apart.
+--- @param dir string
+--- @param identity nvim.autoread.FileIdentity
+--- @return string?
+local function find_file(dir, identity)
+  local handle = uv.fs_scandir(dir)
+  while handle do
+    local name, type = uv.fs_scandir_next(handle)
+    if not name then
+      return nil
+    end
+    if type == 'file' or type == nil then
+      local path = vim.fs.joinpath(dir, name)
+      local found = file_identity(path)
+      if
+        found
+        and found.dev == identity.dev
+        and found.ino == identity.ino
+        and found.mtime.sec == identity.mtime.sec
+        and found.mtime.nsec == identity.mtime.nsec
+      then
+        return path
+      end
+    end
+  end
+end
+
+--- Fires |FileRenamed| if the file watched for `bufnr` was renamed within its directory.
+--- @param bufnr integer
+--- @return boolean renamed Whether an autocommand renamed the buffer.
+local function follow_rename(bufnr)
+  local watcher = watchers[bufnr]
+  if not watcher or uv.fs_stat(watcher.path) then
+    return false
+  end
+  local old = watcher.path
+  local new = find_file(vim.fs.dirname(old), watcher.identity)
+  if not new then
+    return false
+  end
+  local ok, err = pcall(vim.api.nvim_exec_autocmds, 'FileRenamed', {
+    buf = bufnr,
+    modeline = false,
+    data = { old = old, new = new },
+  })
+  if not ok then
+    vim.api.nvim_echo({
+      { ('autoread: FileRenamed failed for buffer %d: %s'):format(bufnr, err) },
+    }, true, { err = true })
+  end
+  return vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) ~= old
+end
+
 --- Stops and cleans up the watcher for a buffer.
 --- @param bufnr integer
 local function stop_watcher(bufnr)
@@ -124,10 +193,19 @@ local function ensure_watcher(bufnr)
   end
 
   local name = vim.api.nvim_buf_get_name(bufnr)
+  local identity = file_identity(name)
+  if not identity then
+    return
+  end
   local timer = assert(uv.new_timer())
   timers[bufnr] = timer
 
   local cancel = watch.watch(name, {}, function(_, change_type)
+    -- Keep the mtime current, since follow_rename() compares it.
+    local current = file_identity(name)
+    if current and current.dev == identity.dev and current.ino == identity.ino then
+      identity.mtime = current.mtime
+    end
     -- Set the 'busy' buffer option for the duration of the pending cycle. This is a small, "best
     -- effort" UX hint, not intended to be noticeable except when filewatcher activity is "noisy".
     set_pending(bufnr, true)
@@ -138,6 +216,11 @@ local function ensure_watcher(bufnr)
         sync_busy(bufnr)
         if not vim.api.nvim_buf_is_loaded(bufnr) or not buf_autoread(bufnr) then
           set_pending(bufnr, false)
+          return
+        end
+
+        if follow_rename(bufnr) then
+          ensure_watcher(bufnr)
           return
         end
 
@@ -160,7 +243,7 @@ local function ensure_watcher(bufnr)
     end)
   end)
 
-  watchers[bufnr] = { path = name, cancel = cancel }
+  watchers[bufnr] = { path = name, cancel = cancel, identity = identity }
 end
 
 function M.enable()

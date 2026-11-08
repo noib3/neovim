@@ -144,6 +144,7 @@ error('Cannot require a meta file')
 --- |'FileReadCmd'
 --- |'FileReadPost'
 --- |'FileReadPre'
+--- |'FileRenamed'
 --- |'FileType'
 --- |'FileWriteCmd'
 --- |'FileWritePost'

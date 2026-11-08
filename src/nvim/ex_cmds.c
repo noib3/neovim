@@ -1743,6 +1743,8 @@ int rename_buffer(char *new_fname)
   char *fname = curbuf->b_ffname;
   char *sfname = curbuf->b_sfname;
   char *xfname = curbuf->b_fname;
+  const FileID old_file_id = curbuf->file_id;
+  const bool old_file_id_valid = curbuf->file_id_valid;
   curbuf->b_ffname = NULL;
   curbuf->b_sfname = NULL;
   if (setfname(curbuf, new_fname, NULL, true) == FAIL) {
@@ -1750,7 +1752,12 @@ int rename_buffer(char *new_fname)
     curbuf->b_sfname = sfname;
     return FAIL;
   }
-  curbuf->b_flags |= BF_NOTEDITED;
+  // The buffer is still editing the same file if the new name refers to it,
+  // e.g. after the file was renamed.
+  if (!old_file_id_valid || !curbuf->file_id_valid
+      || !os_fileid_equal(&old_file_id, &curbuf->file_id)) {
+    curbuf->b_flags |= BF_NOTEDITED;
+  }
   if (xfname != NULL && *xfname != NUL) {
     buf = buflist_new(fname, xfname, curwin->w_cursor.lnum, 0);
     if (buf != NULL && (cmdmod.cmod_flags & CMOD_KEEPALT) == 0) {
